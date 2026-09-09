@@ -27,6 +27,8 @@ export interface OpenInteractivePreviewOptions {
   path: string
   /** Trusted parent origin embedded in CSP `frame-ancestors`. */
   parentOrigin: string
+  /** Caller cancellation; an aborted open must not leave a published grant. */
+  signal?: AbortSignal
 }
 
 /** One minted preview grant returned from {@link InteractivePreview.open}. */

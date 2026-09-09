@@ -9,6 +9,7 @@
  * another client plugin is a type.
  */
 import type { Context as ClientContext } from '@deepseek-ai/cordis'
+import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type {} from '@deepseek-ai/dsh-api-remotes/client'
 import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
@@ -64,7 +65,15 @@ export function apply(ctx: ClientContext): void {
   ctx.effect(() => () => { preview.dispose() }, 'ui-document-preview: controller')
 
   ctx.effect(() => ctx.slots.inject('sidebar.right.pane.tab', () => ctx.slots.register(
-    { name: 'sidebar.right.pane.tab', key: DOCUMENT_PREVIEW_ID, locale: NS, inject: () => ({ preview }) },
+    {
+      name: 'sidebar.right.pane.tab',
+      key: DOCUMENT_PREVIEW_ID,
+      locale: NS,
+      inject: (sessionId: SessionId) => ({
+        preview,
+        hooks: { previewView: preview.state(sessionId) },
+      }),
+    },
     DocumentPreviewPanel,
   )), 'ui-document-preview: document body')
 }

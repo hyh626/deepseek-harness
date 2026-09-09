@@ -4,10 +4,11 @@
  */
 
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
-import { request as rawHttpRequest } from 'node:http'
+import { request as rawHttpRequest, Server } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import type { Agent } from '@deepseek-ai/dsh-agent'
 import { Context } from '@deepseek-ai/cordis'
 import LocalFileSystem from '@deepseek-ai/dsh-fs-local'
 import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
@@ -24,6 +25,7 @@ let root: string | undefined
 let context: Context | undefined
 
 afterEach(async () => {
+  vi.restoreAllMocks()
   await context?.fiber.dispose()
   context = undefined
   if (root !== undefined) rmSync(root, { recursive: true, force: true })
@@ -247,6 +249,24 @@ describe('Host authority and serving', () => {
     expect((await http(endpoint, '/link.txt')).status).toBe(403)
     writeFileSync(join(root!, 'sibling.html'), '<html></html>')
     expect((await http(endpoint, '/../sibling.html')).status).toBe(403)
+
+    writeFileSync(join(root!, 'secret-entry.html'), '<html>secret-entry</html>')
+    rmSync(join(appDir, 'index.html'))
+    symlinkSync(join(root!, 'secret-entry.html'), join(appDir, 'index.html'))
+    const replaced = await http(endpoint, '/')
+    expect(replaced.status).toBe(403)
+    expect(replaced.body).not.toContain('secret-entry')
+    const spaEscape = await http(endpoint, '/missing/route', { accept: 'text/html' })
+    expect(spaEscape.status).toBe(403)
+    expect(spaEscape.body).not.toContain('secret-entry')
+  })
+
+  it('returns 404 when SPA fallback cannot re-resolve the entry', async () => {
+    const { preview, sessionId, appDir } = await harness()
+    const endpoint = grantEndpoint(await openEntry(preview, sessionId, 'app/index.html'))
+    rmSync(join(appDir, 'index.html'))
+    expect((await http(endpoint, '/missing/route', { accept: 'text/html' })).status).toBe(404)
+    expect((await http(endpoint, '/')).status).toBe(404)
   })
 
   it('rejects malformed encodings and enforces readBytes overflow', async () => {
@@ -449,5 +469,156 @@ describe('InteractivePreview config', () => {
     await expect(openEntry(preview, sessionId, 'app/page.htm')).rejects.toMatchObject({
       code: 'preview-max-grants',
     })
+  })
+})
+
+describe('InteractivePreview remotes', () => {
+  it('starts and stops a grant through the Typert remote methods', async () => {
+    const { preview, sessionId } = await harness()
+    const agent = { id: sessionId } as Agent
+    const signal = new AbortController().signal
+    const grant = await preview.remoteExportStart(agent, 'app/index.html', PARENT_ORIGIN, signal)
+    const endpoint = grantEndpoint(grant)
+    expect((await http(endpoint, '/')).status).toBe(200)
+    await preview.remoteExportStop(grant.id, signal)
+    await expect(http(endpoint, '/')).rejects.toThrow()
+    await preview.remoteExportStop(grant.id, signal)
+  })
+
+  it('maps InteractivePreviewError to RemoteError on start', async () => {
+    const { preview, sessionId } = await harness()
+    const agent = { id: sessionId } as Agent
+    await expect(preview.remoteExportStart(
+      agent,
+      'app/missing.html',
+      PARENT_ORIGIN,
+      new AbortController().signal,
+    )).rejects.toMatchObject({ code: 'interactive-preview/entry-not-found' })
+    await expect(preview.remoteExportStart(
+      { id: SessionId('missing') } as Agent,
+      'app/index.html',
+      PARENT_ORIGIN,
+      new AbortController().signal,
+    )).rejects.toMatchObject({ code: 'interactive-preview/session-not-found' })
+    await expect(preview.remoteExportStart(
+      agent,
+      'app/index.html',
+      'not-an-origin',
+      new AbortController().signal,
+    )).rejects.toMatchObject({ code: 'interactive-preview/invalid-parent-origin' })
+    await expect(preview.remoteExportStart(
+      agent,
+      'app/app.js',
+      PARENT_ORIGIN,
+      new AbortController().signal,
+    )).rejects.toMatchObject({ code: 'interactive-preview/entry-not-html' })
+    await expect(preview.remoteExportStart(
+      agent,
+      'app',
+      PARENT_ORIGIN,
+      new AbortController().signal,
+    )).rejects.toMatchObject({ code: 'interactive-preview/entry-not-file' })
+    const outsideRoot = mkdtempSync(join(tmpdir(), 'dsh-preview-remote-outside-'))
+    const outside = join(outsideRoot, 'outside.html')
+    writeFileSync(outside, '<html></html>')
+    try {
+      await expect(preview.remoteExportStart(
+        agent,
+        outside,
+        PARENT_ORIGIN,
+        new AbortController().signal,
+      )).rejects.toMatchObject({ code: 'interactive-preview/outside-workspace' })
+    } finally {
+      rmSync(outsideRoot, { recursive: true, force: true })
+    }
+    context!.sessions.create(SessionId('no-cwd'))
+    await expect(preview.remoteExportStart(
+      { id: SessionId('no-cwd') } as Agent,
+      'app/index.html',
+      PARENT_ORIGIN,
+      new AbortController().signal,
+    )).rejects.toMatchObject({ code: 'interactive-preview/session-no-cwd' })
+  })
+
+  it('maps grant-cap and disposal failures on the remote start path', async () => {
+    const { preview, sessionId } = await harness({ maxGrants: 1 })
+    const agent = { id: sessionId } as Agent
+    const signal = new AbortController().signal
+    await preview.remoteExportStart(agent, 'app/index.html', PARENT_ORIGIN, signal)
+    await expect(preview.remoteExportStart(agent, 'app/page.htm', PARENT_ORIGIN, signal))
+      .rejects.toMatchObject({ code: 'interactive-preview/max-grants' })
+    await context!.fiber.dispose()
+    await expect(preview.remoteExportStart(agent, 'app/index.html', PARENT_ORIGIN, signal))
+      .rejects.toMatchObject({ code: 'interactive-preview/disposed' })
+  })
+
+  it('rethrows non-preview failures from remote start', async () => {
+    const { preview, sessionId } = await harness()
+    vi.spyOn(context!.fs, 'stat').mockRejectedValueOnce(new Error('stat boom'))
+    await expect(preview.remoteExportStart(
+      { id: sessionId } as Agent,
+      'app/index.html',
+      PARENT_ORIGIN,
+      new AbortController().signal,
+    )).rejects.toThrow('stat boom')
+  })
+
+  it('rejects an already-aborted remote signal', async () => {
+    const { preview, sessionId } = await harness()
+    const abort = new AbortController()
+    abort.abort()
+    await expect(preview.remoteExportStart(
+      { id: sessionId } as Agent,
+      'app/index.html',
+      PARENT_ORIGIN,
+      abort.signal,
+    )).rejects.toThrow()
+    await expect(preview.remoteExportStop(InteractivePreviewId('missing'), abort.signal)).rejects.toThrow()
+  })
+
+  it('does not publish a grant when the RPC signal aborts during listen', async () => {
+    const { preview, sessionId } = await harness()
+    const abort = new AbortController()
+    const originalListen = Server.prototype.listen
+    vi.spyOn(Server.prototype, 'listen').mockImplementation(function (this: Server, ...args: unknown[]) {
+      const callback = args.at(-1)
+      if (typeof callback !== 'function') {
+        return originalListen.apply(this, args as never)
+      }
+      const prefix = args.slice(0, -1)
+      return originalListen.call(
+        this,
+        ...(prefix as [number, string]),
+        () => {
+          abort.abort()
+          ;(callback as () => void)()
+        },
+      )
+    })
+    await expect(preview.remoteExportStart(
+      { id: sessionId } as Agent,
+      'app/index.html',
+      PARENT_ORIGIN,
+      abort.signal,
+    )).rejects.toMatchObject({ name: 'AbortError' })
+    expect(previewInternals(preview).grants.size).toBe(0)
+  })
+
+  it('closes a grant published after the RPC signal aborted', async () => {
+    const { preview, sessionId } = await harness()
+    const abort = new AbortController()
+    const grants = previewInternals(preview).grants
+    const originalSet = grants.set.bind(grants)
+    vi.spyOn(grants, 'set').mockImplementation((id, grant) => {
+      abort.abort()
+      return originalSet(id, grant)
+    })
+    await expect(preview.open({
+      sessionId,
+      path: 'app/index.html',
+      parentOrigin: PARENT_ORIGIN,
+      signal: abort.signal,
+    })).rejects.toMatchObject({ name: 'AbortError' })
+    expect(grants.size).toBe(0)
   })
 })

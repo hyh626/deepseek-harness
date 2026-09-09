@@ -9,8 +9,10 @@ import LocalFileSystem from '@deepseek-ai/dsh-fs-local'
 import { FsError } from '@deepseek-ai/dsh-fs'
 import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
 import * as nodeHttp from 'node:http'
+import { Server } from 'node:http'
 import InteractivePreview from '../src/service.ts'
 import { hasTraversalSegments, resolvePreviewPath } from '../src/paths.ts'
+import { previewInternals } from './test-internals.ts'
 
 const PARENT_ORIGIN = 'http://127.0.0.1:3000'
 
@@ -25,7 +27,7 @@ afterEach(async () => {
   root = undefined
 })
 
-async function bootPreview(): Promise<InteractivePreview> {
+async function bootWorkspace(): Promise<InteractivePreview> {
   root = realpathSync.native(mkdtempSync(join(tmpdir(), 'dsh-preview-cov-')))
   const appDir = join(root, 'app')
   mkdirSync(appDir)
@@ -43,8 +45,20 @@ async function bootPreview(): Promise<InteractivePreview> {
     maxAssetBytes: 64,
     inactivityTimeoutMs: 60_000,
   })
-  context.sessions.create(SessionId('cov'), { meta: { cwd: root } })
   return context.interactivePreview
+}
+
+async function bootPreview(): Promise<InteractivePreview> {
+  const preview = await bootWorkspace()
+  context!.sessions.create(SessionId('cov'), { meta: { cwd: root! } })
+  return preview
+}
+
+function attachSession(id = SessionId('cov')): { sessionId: ReturnType<typeof SessionId>; detach: () => void } {
+  const session = context!.sessions.prepare(id, { meta: { cwd: root! } })
+  const detach = context!.sessions.enter(session)
+  context!.sessions.announce(session)
+  return { sessionId: id, detach }
 }
 
 describe('resolvePreviewPath edge behavior', () => {
@@ -61,7 +75,7 @@ describe('resolvePreviewPath edge behavior', () => {
       expect(await resolvePreviewPath(fs, appRoot, appRootPath, 'index.html', '/%E0%A4%A', signal))
         .toEqual({ kind: 'traversal' })
       expect(await resolvePreviewPath(fs, appRoot, appRootPath, 'index.html', '/index.html', signal))
-        .toEqual({ kind: 'entry' })
+        .toEqual({ kind: 'missing' })
     } finally {
       rmSync(localRoot, { recursive: true, force: true })
     }
@@ -299,5 +313,138 @@ describe('InteractivePreview.open edge behavior', () => {
     req.end()
     req.destroy()
     await expect(pending).rejects.toThrow()
+  })
+})
+
+describe('InteractivePreview session disposal during open', () => {
+  it('does not publish a grant when the session disposes during entry resolve', async () => {
+    const preview = await bootWorkspace()
+    const { sessionId, detach } = attachSession()
+    const originalResolve = context!.fs.resolve.bind(context!.fs)
+    let release!: () => void
+    const gate = new Promise<void>((resolve) => { release = resolve })
+    vi.spyOn(context!.fs, 'resolve').mockImplementation(async (path, opts) => {
+      if (path === 'app/index.html') {
+        await gate
+        return await originalResolve(path, opts)
+      }
+      return await originalResolve(path, opts)
+    })
+    const pending = preview.open({
+      sessionId,
+      path: 'app/index.html',
+      parentOrigin: PARENT_ORIGIN,
+    })
+    detach()
+    release()
+    await expect(pending).rejects.toMatchObject({ code: 'preview-session-not-found' })
+    expect(previewInternals(preview).grants.size).toBe(0)
+  })
+
+  it('does not publish a grant when the session disposes during listen', async () => {
+    const preview = await bootWorkspace()
+    const { sessionId, detach } = attachSession()
+    const originalListen = Server.prototype.listen
+    vi.spyOn(Server.prototype, 'listen').mockImplementation(function (this: Server, ...args: unknown[]) {
+      const callback = args.at(-1)
+      if (typeof callback !== 'function') {
+        return originalListen.apply(this, args as never)
+      }
+      const prefix = args.slice(0, -1)
+      return originalListen.call(
+        this,
+        ...(prefix as [number, string]),
+        () => {
+          detach()
+          ;(callback as () => void)()
+        },
+      )
+    })
+    await expect(preview.open({
+      sessionId,
+      path: 'app/index.html',
+      parentOrigin: PARENT_ORIGIN,
+    })).rejects.toMatchObject({ code: 'preview-session-not-found' })
+    expect(previewInternals(preview).grants.size).toBe(0)
+  })
+
+  it('closes a published grant when the session disposes', async () => {
+    const preview = await bootWorkspace()
+    const { sessionId, detach } = attachSession()
+    const grant = await preview.open({
+      sessionId,
+      path: 'app/index.html',
+      parentOrigin: PARENT_ORIGIN,
+    })
+    const url = new URL(grant.origin)
+    detach()
+    await vi.waitFor(() => {
+      expect(previewInternals(preview).grants.size).toBe(0)
+    })
+    await expect(new Promise<void>((resolve, reject) => {
+      const req = nodeHttp.request({
+        hostname: '127.0.0.1',
+        port: url.port,
+        path: '/',
+        headers: { host: url.host },
+      }, (res) => {
+        res.resume()
+        res.on('end', () => { resolve() })
+      })
+      req.on('error', reject)
+      req.end()
+    })).rejects.toThrow()
+  })
+
+  it('maps entry stat failures through open abort classification', async () => {
+    const preview = await bootPreview()
+    vi.spyOn(context!.fs, 'stat').mockRejectedValueOnce(new Error('stat boom'))
+    await expect(preview.open({
+      sessionId: SessionId('cov'),
+      path: 'app/index.html',
+      parentOrigin: PARENT_ORIGIN,
+    })).rejects.toThrow('stat boom')
+  })
+
+  it('maps app-root resolve failures through open abort classification', async () => {
+    const preview = await bootPreview()
+    const originalResolve = context!.fs.resolve.bind(context!.fs)
+    vi.spyOn(context!.fs, 'resolve').mockImplementation(async (path, opts) => {
+      const resolved = await originalResolve(path, opts)
+      if (context!.fs.processPath(resolved) === join(root!, 'app') && path !== root) {
+        throw new Error('app root failed')
+      }
+      return resolved
+    })
+    await expect(preview.open({
+      sessionId: SessionId('cov'),
+      path: 'app/index.html',
+      parentOrigin: PARENT_ORIGIN,
+    })).rejects.toThrow('app root failed')
+  })
+
+  it('aborts an unpublished open when the caller signal fires during resolve', async () => {
+    const preview = await bootPreview()
+    const abort = new AbortController()
+    const originalResolve = context!.fs.resolve.bind(context!.fs)
+    let release!: () => void
+    const gate = new Promise<void>((resolve) => { release = resolve })
+    vi.spyOn(context!.fs, 'resolve').mockImplementation(async (path, opts) => {
+      if (path === 'app/index.html') {
+        await gate
+        return await originalResolve(path, opts)
+      }
+      return await originalResolve(path, opts)
+    })
+    const pending = preview.open({
+      sessionId: SessionId('cov'),
+      path: 'app/index.html',
+      parentOrigin: PARENT_ORIGIN,
+      signal: abort.signal,
+    })
+    abort.abort()
+    release()
+    await expect(pending).rejects.toMatchObject({ name: 'AbortError' })
+    expect(previewInternals(preview).grants.size).toBe(0)
   })
 })

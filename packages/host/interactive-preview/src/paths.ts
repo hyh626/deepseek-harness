@@ -7,7 +7,6 @@ import { FsError, type FileSystem, type FsTarget } from '@deepseek-ai/dsh-fs'
 
 /** Outcome of resolving one URL path against an app root. */
 export type ResolvedPreviewPath =
-  | { kind: 'entry' }
   | { kind: 'file'; target: FsTarget }
   | { kind: 'traversal' }
   | { kind: 'missing' }
@@ -68,7 +67,7 @@ export async function resolvePreviewPath(
   } catch {
     return { kind: 'traversal' }
   }
-  if (relative === '' || relative === entryBaseName) return { kind: 'entry' }
+  if (relative === '') relative = entryBaseName
 
   let target: FsTarget
   try {
@@ -83,6 +82,22 @@ export async function resolvePreviewPath(
   const info = await fs.stat(target, signal)
   if (info === undefined || info.type !== 'file') return { kind: 'missing' }
   return { kind: 'file', target }
+}
+
+/**
+ * Return true when the request path names the grant entry (`/` or the entry basename).
+ * @param pathname - raw URL pathname (still encoded).
+ * @param entryBaseName - basename of the entry HTML file.
+ * @returns true when the path is the entry itself rather than another asset.
+ */
+export function isPreviewEntryPath(pathname: string, entryBaseName: string): boolean {
+  if (hasTraversalSegments(pathname)) return false
+  try {
+    const relative = decodeURIComponent(pathname).replace(/^\/+/, '')
+    return relative === '' || relative === entryBaseName
+  } catch {
+    return false
+  }
 }
 
 /**

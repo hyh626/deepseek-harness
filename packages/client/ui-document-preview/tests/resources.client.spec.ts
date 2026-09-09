@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { collectHtmlImageSources, isPreviewableDocumentPath, isPreviewableImageSource, previewBasename, previewDocumentFormat, resolvePreviewImagePath, rewriteHtmlImageSources } from '../src/client/resources.ts'
+import { collectHtmlImageSources, collectMarkdownImageSources, isPreviewableDocumentPath, isPreviewableImageSource, previewBasename, previewDocumentFormat, resolvePreviewImagePath, rewriteHtmlImageSources } from '../src/client/resources.ts'
 
 describe('previewable path gates', () => {
   it('accepts markdown and html extensions without regard to case', () => {
@@ -40,5 +40,39 @@ describe('previewable path gates', () => {
     expect(resolvePreviewImagePath('work/notes.md', 'docs/shot.png')).toBe('work/docs/shot.png')
     expect(resolvePreviewImagePath('C:/w/page.html', '../img/a.png')).toBe('C:/img/a.png')
     expect(resolvePreviewImagePath('/w/page.html', '/abs/x.png')).toBe('/abs/x.png')
+    expect(resolvePreviewImagePath('/w/page.html', './dot.png?v=1')).toBe('/w/dot.png')
+    expect(resolvePreviewImagePath('/w/page.html', './dot.png#frag')).toBe('/w/dot.png')
+    expect(resolvePreviewImagePath('notes.md', 'dot.png')).toBe('dot.png')
+    expect(resolvePreviewImagePath('/w/page.html', 'C:')).toBe('C:/')
+    expect(resolvePreviewImagePath('/w/page.html', 'C:/foo/../..')).toBe('C:/')
+  })
+})
+
+describe('collectMarkdownImageSources', () => {
+  it('collects inline and reference-style raster destinations', () => {
+    const markdown = [
+      '![Inline](./inline.png)',
+      '![Dot][dot]',
+      '![Also][DOT]',
+      '![Collapsed][]',
+      '![Skip][missing]',
+      '![Remote][remote]',
+      '',
+      '[dot]: ./dot.png',
+      '[collapsed]: ./collapsed.png',
+      '[remote]: https://ex/a.png',
+    ].join('\n')
+    expect(collectMarkdownImageSources(markdown)).toEqual([
+      './inline.png',
+      './dot.png',
+      './collapsed.png',
+    ])
+    expect(collectMarkdownImageSources([
+      '![Keep][dot]',
+      '[   ]: ./ignored.png',
+      '[dot]: ./first.png',
+      '[dot]: ./second.png',
+      '![][]',
+    ].join('\n'))).toEqual(['./first.png'])
   })
 })

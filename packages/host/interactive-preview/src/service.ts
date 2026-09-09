@@ -30,7 +30,13 @@ import {
 import { methodNotAllowedHeaders, previewSecurityHeaders, wrongHostHeaders } from './headers.ts'
 import { scheduleInactivityTimeout } from './inactivity.ts'
 import { rethrowUnlessDisposed } from './open-errors.ts'
-import { acceptsHtml, contentTypeForPath, rawPathname, resolvePreviewPath } from './paths.ts'
+import {
+  acceptsHtml,
+  contentTypeForPath,
+  isPreviewEntryPath,
+  rawPathname,
+  resolvePreviewPath,
+} from './paths.ts'
 import {
   isActivePreviewGrant,
   previewRequestSignal,
@@ -89,26 +95,27 @@ const REMOTE_CODES = {
 } as const
 
 function throwRemote(error: unknown, context: {
-  sessionId?: SessionId
-  path?: string
-  parentOrigin?: string
+  sessionId: SessionId | string
+  path: string
+  parentOrigin: string
 }): never {
   if (error instanceof InteractivePreviewError) {
     const code = REMOTE_CODES[error.code]
     switch (error.code) {
       case 'preview-session-not-found':
       case 'preview-session-no-cwd':
-        throw new RemoteError(code, error.message, { sessionId: context.sessionId ?? '' })
+        throw new RemoteError(code, error.message, { sessionId: context.sessionId })
       case 'preview-entry-not-found':
       case 'preview-entry-not-file':
       case 'preview-entry-not-html':
       case 'preview-outside-workspace':
-        throw new RemoteError(code, error.message, { path: context.path ?? '' })
+        throw new RemoteError(code, error.message, { path: context.path })
       case 'preview-invalid-parent-origin':
-        throw new RemoteError(code, error.message, { parentOrigin: context.parentOrigin ?? '' })
+        throw new RemoteError(code, error.message, { parentOrigin: context.parentOrigin })
       case 'preview-max-grants':
       case 'preview-disposed':
         throw new RemoteError(code, error.message, {})
+      /* v8 ignore next -- closed error-code exhaustiveness; new codes fail compilation */
       default:
         throw error
     }
@@ -122,6 +129,12 @@ declare module '@deepseek-ai/cordis' {
   }
 }
 
+interface PendingOpen {
+  controller: AbortController
+  signal: AbortSignal
+  finish: () => void
+}
+
 interface GrantState {
   id: InteractivePreviewId
   sessionId: SessionId
@@ -131,7 +144,6 @@ interface GrantState {
   parentOrigin: string
   appRoot: FsTarget
   appRootPath: string
-  entry: FsTarget
   entryBaseName: string
   inactivityTimer: ReturnType<typeof setTimeout> | undefined
   closed: boolean
@@ -164,6 +176,7 @@ export default class InteractivePreview extends TypertRemoteService {
   })
 
   private readonly grants = new Map<InteractivePreviewId, GrantState>()
+  private readonly pendingOpensBySession = new Map<SessionId, Set<AbortController>>()
   private pendingOpens = 0
   private disposed = false
   private readonly disposalAbort = new AbortController()
@@ -229,8 +242,21 @@ export default class InteractivePreview extends TypertRemoteService {
     releaseReservation: () => void,
   ): Promise<InteractivePreviewGrant> {
     const parentOrigin = validateParentOrigin(options.parentOrigin)
-    const openSignal = this.disposalAbort.signal
+    const pending = this.beginPendingOpen(options.sessionId, options.signal)
+    try {
+      return await this.mintGrant(options, parentOrigin, pending, releaseReservation)
+    } finally {
+      pending.finish()
+    }
+  }
 
+  private async mintGrant(
+    options: OpenInteractivePreviewOptions,
+    parentOrigin: string,
+    pending: PendingOpen,
+    releaseReservation: () => void,
+  ): Promise<InteractivePreviewGrant> {
+    const openSignal = pending.signal
     const session = this.ctx.sessions.get(options.sessionId)
     if (session === undefined) {
       throw new InteractivePreviewError(
@@ -247,7 +273,7 @@ export default class InteractivePreview extends TypertRemoteService {
     }
 
     const workspaceRoot = await this.ctx.fs.resolve(cwd, { signal: openSignal }).catch((error: unknown) => {
-      rethrowUnlessDisposed(this.disposed, openSignal, error)
+      this.failOpen(options.sessionId, pending, options.signal, error)
     })
     let entry: FsTarget
     try {
@@ -259,7 +285,7 @@ export default class InteractivePreview extends TypertRemoteService {
           'preview-entry-not-found',
         )
       }
-      rethrowUnlessDisposed(this.disposed, openSignal, error)
+      this.failOpen(options.sessionId, pending, options.signal, error)
     }
     if (!this.ctx.fs.contains(workspaceRoot, entry)) {
       throw new InteractivePreviewError(
@@ -269,7 +295,12 @@ export default class InteractivePreview extends TypertRemoteService {
     }
 
     const entryPath = this.ctx.fs.processPath(entry)
-    const entryInfo = await this.ctx.fs.stat(entry, openSignal)
+    let entryInfo
+    try {
+      entryInfo = await this.ctx.fs.stat(entry, openSignal)
+    } catch (error: unknown) {
+      this.failOpen(options.sessionId, pending, options.signal, error)
+    }
     if (entryInfo === undefined) {
       throw new InteractivePreviewError(
         `interactive preview entry "${options.path}" was not found`,
@@ -291,7 +322,12 @@ export default class InteractivePreview extends TypertRemoteService {
     }
 
     const appRootPath = dirname(entryPath)
-    const appRoot = await this.ctx.fs.resolve(appRootPath, { signal: openSignal })
+    let appRoot
+    try {
+      appRoot = await this.ctx.fs.resolve(appRootPath, { signal: openSignal })
+    } catch (error: unknown) {
+      this.failOpen(options.sessionId, pending, options.signal, error)
+    }
 
     const id = InteractivePreviewId(randomHexLabel())
     const capability = randomHexLabel()
@@ -328,15 +364,17 @@ export default class InteractivePreview extends TypertRemoteService {
       })
     } catch (error: unknown) {
       await new Promise<void>((resolve) => { server.close(() => { resolve() }) })
-      throw error
+      this.failOpen(options.sessionId, pending, options.signal, error)
     }
 
-    if (this.disposalAbort.signal.aborted) {
-      await new Promise<void>((resolve) => {
-        server.closeAllConnections()
-        server.close(() => { resolve() })
-      })
-      throw new InteractivePreviewError('interactive preview service is disposed', 'preview-disposed')
+    const unpublished = this.unpublishedOpenFailure(options.sessionId, pending, options.signal)
+    if (unpublished !== undefined) {
+      await this.closeUnpublishedServer(server)
+      throw unpublished
+    }
+    if (options.signal?.aborted) {
+      await this.closeUnpublishedServer(server)
+      options.signal.throwIfAborted()
     }
 
     const port = (server.address() as AddressInfo).port
@@ -350,7 +388,6 @@ export default class InteractivePreview extends TypertRemoteService {
       parentOrigin,
       appRoot,
       appRootPath,
-      entry,
       entryBaseName: basename(entryPath),
       inactivityTimer: undefined,
       closed: false,
@@ -360,6 +397,10 @@ export default class InteractivePreview extends TypertRemoteService {
     }
     holder.grant = grant
     this.grants.set(id, grant)
+    if (options.signal?.aborted) {
+      await this.close(id)
+      options.signal.throwIfAborted()
+    }
     releaseReservation()
     this.touchInactivity(grant)
 
@@ -393,7 +434,7 @@ export default class InteractivePreview extends TypertRemoteService {
   ): Promise<InteractivePreviewGrant> {
     signal.throwIfAborted()
     try {
-      return await this.open({ sessionId: agent.id, path, parentOrigin })
+      return await this.open({ sessionId: agent.id, path, parentOrigin, signal })
     } catch (error: unknown) {
       throwRemote(error, { sessionId: agent.id, path, parentOrigin })
     }
@@ -410,7 +451,65 @@ export default class InteractivePreview extends TypertRemoteService {
     await this.close(id)
   }
 
+  private beginPendingOpen(sessionId: SessionId, rpcSignal?: AbortSignal): PendingOpen {
+    const controller = new AbortController()
+    const existing = this.pendingOpensBySession.get(sessionId)
+    const pending = existing ?? new Set<AbortController>()
+    if (existing === undefined) this.pendingOpensBySession.set(sessionId, pending)
+    pending.add(controller)
+    const sources = [this.disposalAbort.signal, controller.signal]
+    if (rpcSignal !== undefined) sources.push(rpcSignal)
+    return {
+      controller,
+      signal: AbortSignal.any(sources),
+      finish: () => {
+        pending.delete(controller)
+        if (pending.size === 0) this.pendingOpensBySession.delete(sessionId)
+      },
+    }
+  }
+
+  private unpublishedOpenFailure(
+    sessionId: SessionId,
+    pending: PendingOpen,
+    rpcSignal?: AbortSignal,
+  ): InteractivePreviewError | undefined {
+    if (this.disposed || this.disposalAbort.signal.aborted) {
+      return new InteractivePreviewError('interactive preview service is disposed', 'preview-disposed')
+    }
+    if (rpcSignal?.aborted) return undefined
+    if (pending.controller.signal.aborted || this.ctx.sessions.get(sessionId) === undefined) {
+      return new InteractivePreviewError(
+        `interactive preview session "${sessionId}" was not found`,
+        'preview-session-not-found',
+      )
+    }
+  }
+
+  private failOpen(
+    sessionId: SessionId,
+    pending: PendingOpen,
+    rpcSignal: AbortSignal | undefined,
+    error: unknown,
+  ): never {
+    const mapped = this.unpublishedOpenFailure(sessionId, pending, rpcSignal)
+    if (mapped !== undefined) throw mapped
+    if (rpcSignal?.aborted) rpcSignal.throwIfAborted()
+    rethrowUnlessDisposed(this.disposed, pending.signal, error)
+  }
+
+  private async closeUnpublishedServer(server: Server): Promise<void> {
+    await new Promise<void>((resolve) => {
+      server.closeAllConnections()
+      server.close(() => { resolve() })
+    })
+  }
+
   private async closeGrantsForSession(sessionId: SessionId): Promise<void> {
+    const pending = this.pendingOpensBySession.get(sessionId)
+    if (pending !== undefined) {
+      for (const controller of pending) controller.abort()
+    }
     const closing = [...this.grants.values()]
       .filter(grant => grant.sessionId === sessionId)
       .map((grant) => { return this.close(grant.id) })
@@ -488,23 +587,41 @@ export default class InteractivePreview extends TypertRemoteService {
 
     let target: FsTarget
     switch (resolved.kind) {
-      case 'entry':
-        target = grant.entry
-        break
       case 'file':
         target = resolved.target
         break
       case 'traversal':
         this.deny(res, 403, grant.parentOrigin)
         return
-      case 'missing':
-        if (acceptsHtml(req.headers.accept)) {
-          target = grant.entry
-        } else {
+      case 'missing': {
+        if (!acceptsHtml(req.headers.accept) || isPreviewEntryPath(pathname, grant.entryBaseName)) {
           this.deny(res, 404, grant.parentOrigin)
           return
         }
+        let fallback
+        try {
+          fallback = await resolvePreviewPath(
+            this.ctx.fs,
+            grant.appRoot,
+            grant.appRootPath,
+            grant.entryBaseName,
+            `/${grant.entryBaseName}`,
+            signal,
+          )
+        } catch (error: unknown) {
+          if (wasPreviewRequestAborted(signal, error)) {
+            res.destroy()
+            return
+          }
+          throw error
+        }
+        if (fallback.kind !== 'file') {
+          this.deny(res, fallback.kind === 'traversal' ? 403 : 404, grant.parentOrigin)
+          return
+        }
+        target = fallback.target
         break
+      }
       /* v8 ignore next -- closed union default */
       default:
         return assertNever(resolved)

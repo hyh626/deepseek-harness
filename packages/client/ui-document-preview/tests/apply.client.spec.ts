@@ -67,6 +67,11 @@ describe('ui-document-preview apply', () => {
       ['sidebar.right.pane.tab', DOCUMENT_PREVIEW_ID, 'documentPreview', DocumentPreviewPanel],
     ])
     expect(typeof registered[0]?.inject).toBe('function')
+    const injected = (registered[0]?.inject as (sessionId: string) => {
+      preview: { state: (sessionId: string) => unknown }
+      hooks: { previewView: unknown }
+    })('s-1')
+    expect(injected.hooks.previewView).toBe(injected.preview.state('s-1'))
   })
 
   it('takes every registration back when the plugin is disposed', async () => {

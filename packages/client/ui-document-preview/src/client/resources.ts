@@ -5,6 +5,8 @@
 const PREVIEW_EXTENSIONS = new Set(['.md', '.markdown', '.html', '.htm'])
 const IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.webp', '.gif'])
 const MARKDOWN_IMAGE = /!\[[^\]]*]\(\s*<?([^)\s>]+)>?(?:\s+"[^"]*")?\s*\)/g
+const MARKDOWN_REF_DEF = /^[ ]{0,3}\[([^\]]+)]:\s+<?([^\s>]+)>?/gm
+const MARKDOWN_REF_IMAGE = /!\[([^\]]*)]\[([^\]]*)]/g
 const HTML_IMAGE_SRC = /\bsrc\s*=\s*(["'])([^"']+)\1/gi
 
 /**
@@ -62,7 +64,7 @@ export function previewDocumentFormat(path: string): 'markdown' | 'html' | undef
  * @returns The path to hand `workspaceFiles.readBytes`.
  */
 export function resolvePreviewImagePath(documentPath: string, source: string): string {
-  const relative = source.trim().replace(/\\/g, '/')
+  const relative = source.trim().replace(/\\/g, '/').replace(/[?#].*$/, '')
   if (relative.startsWith('/') || /^[A-Za-z]:/.test(relative)) return normalizePosixPath(relative)
   const base = documentPath.replace(/\\/g, '/')
   const slash = base.lastIndexOf('/')
@@ -107,7 +109,34 @@ export function isPreviewableImageSource(source: string): boolean {
  * @returns Unique relative image sources in document order.
  */
 export function collectMarkdownImageSources(markdown: string): string[] {
-  return uniqueMatching(markdown, MARKDOWN_IMAGE, 1)
+  const sources = uniqueMatching(markdown, MARKDOWN_IMAGE, 1)
+  const seen = new Set(sources)
+  const defs = new Map<string, string>()
+  MARKDOWN_REF_DEF.lastIndex = 0
+  for (const match of markdown.matchAll(MARKDOWN_REF_DEF)) {
+    const rawLabel = match[1]
+    const dest = match[2]
+    if (rawLabel === undefined || dest === undefined) continue
+    const label = normalizeMarkdownRef(rawLabel)
+    if (label === '' || defs.has(label)) continue
+    defs.set(label, dest)
+  }
+  MARKDOWN_REF_IMAGE.lastIndex = 0
+  for (const match of markdown.matchAll(MARKDOWN_REF_IMAGE)) {
+    const explicit = match[2]
+    const implicit = match[1]
+    if (explicit === undefined || implicit === undefined) continue
+    const label = normalizeMarkdownRef(explicit === '' ? implicit : explicit)
+    const dest = defs.get(label)
+    if (dest === undefined || !isPreviewableImageSource(dest) || seen.has(dest)) continue
+    seen.add(dest)
+    sources.push(dest)
+  }
+  return sources
+}
+
+function normalizeMarkdownRef(label: string): string {
+  return label.trim().replace(/\s+/g, ' ').toLowerCase()
 }
 
 /**

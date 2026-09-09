@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
+import { useSyncExternalStore } from 'react'
 import { cleanup, fireEvent, render, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
-import { createSnapshotStore } from '@deepseek-ai/dsh-client-store'
+import { createSnapshotStore, type SnapshotStore } from '@deepseek-ai/dsh-client-store'
 import { DocumentPreviewPanel } from '../src/client/DocumentPreviewPanel.tsx'
 import type { DocumentPreviewSlotProps } from '../src/client/DocumentPreviewPanel.tsx'
 import type { DocumentPreviewView, IDocumentPreview } from '../src/client/controller.ts'
@@ -51,6 +52,13 @@ function t(key: keyof typeof en): string {
   return en[key]
 }
 
+function bindPreviewView(store: SnapshotStore<DocumentPreviewView>) {
+  return <Selected,>(select: (view: DocumentPreviewView) => Selected): Selected => {
+    const snapshot = useSyncExternalStore(store.subscribe, store.getSnapshot)
+    return select(snapshot)
+  }
+}
+
 function panelProps(
   preview: IDocumentPreview,
   address = ADDRESS,
@@ -60,6 +68,7 @@ function panelProps(
     sessionId: sid,
     preview,
     t,
+    usePreviewView: bindPreviewView(preview.state(sid)),
     useTabInfo: () => ({
       sidebar: { expanded: true, fullscreen: false },
       panel: { id: 'pane-1' },
@@ -90,6 +99,18 @@ describe('DocumentPreviewPanel', () => {
     expect(getByText(en.empty)).toBeTruthy()
     expect(queryByLabelText('Close preview')).toBeNull()
     controller.abort()
+    expect(preview.close).toHaveBeenCalledWith(sid)
+  })
+
+  it('closes the preview when the tab body unmounts', async () => {
+    const preview = fakePreview(IDLE)
+    const { unmount } = render(
+      <DocumentPreviewPanel {...panelProps(preview)} />,
+    )
+    await waitFor(() => {
+      expect(preview.open).toHaveBeenCalledWith(sid, PATH)
+    })
+    unmount()
     expect(preview.close).toHaveBeenCalledWith(sid)
   })
 

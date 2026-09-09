@@ -15,7 +15,7 @@ const PREVIEW_CSP = [
   "script-src 'none'",
   "connect-src 'none'",
   "style-src 'unsafe-inline'",
-  'img-src blob: data: https: http:',
+  'img-src blob: data:',
   "form-action 'none'",
   "base-uri 'none'",
 ].join('; ')

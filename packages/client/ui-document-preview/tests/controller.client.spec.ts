@@ -270,16 +270,26 @@ describe('DocumentPreviewController', () => {
     preview.enableInteractive(sid('s1'))
     expect(deps.startInteractivePreview).toHaveBeenCalledTimes(1)
 
-    deps.stopInteractivePreview = vi.fn(async () => { throw new Error('already closed') })
-    deps.startInteractivePreview = vi.fn(async () => {
-      const error = new Error('no provider')
-      Object.assign(error, { code: 'interactive-preview/entry-not-html' })
-      throw error
-    })
+    deps.stopInteractivePreview = vi.fn(async () => { throw new Error('stop failed') })
     preview.close(sid('s1'))
     preview.open(sid('s1'), 'page.html')
     await vi.waitFor(() => {
       expect(preview.state(sid('s1')).getSnapshot().status).toBe('ready')
+    })
+    preview.enableInteractive(sid('s1'))
+    await vi.waitFor(() => {
+      expect(preview.state(sid('s1')).getSnapshot()).toMatchObject({
+        startingInteractive: false,
+        interactiveError: 'stop failed',
+      })
+    })
+    expect(deps.startInteractivePreview).toHaveBeenCalledTimes(1)
+
+    deps.stopInteractivePreview = vi.fn(async () => undefined)
+    deps.startInteractivePreview = vi.fn(async () => {
+      const error = new Error('no provider')
+      Object.assign(error, { code: 'interactive-preview/entry-not-html' })
+      throw error
     })
     preview.enableInteractive(sid('s1'))
     await vi.waitFor(() => {
@@ -373,6 +383,19 @@ describe('DocumentPreviewController', () => {
     await vi.waitFor(() => {
       expect(preview.state(sid('s1')).getSnapshot().interactiveError).toBe('plain')
     })
+    deps.startInteractivePreview = vi.fn(async () => { throw { code: 'x' } })
+    preview.enableInteractive(sid('s1'))
+    await vi.waitFor(() => {
+      expect(preview.state(sid('s1')).getSnapshot().interactiveError).toBe('[object Object]')
+    })
+    const bare = new Error('hidden')
+    Object.defineProperty(bare, 'message', { value: 1 })
+    deps.startInteractivePreview = vi.fn(async () => { throw bare })
+    preview.enableInteractive(sid('s1'))
+    await vi.waitFor(() => {
+      expect(preview.state(sid('s1')).getSnapshot().interactiveError).toBe(1)
+    })
+    deps.stopInteractivePreview = vi.fn(async () => undefined)
     preview.dispose()
   })
 
@@ -476,5 +499,31 @@ describe('DocumentPreviewController', () => {
     stopChange.resolve(undefined)
     await Promise.resolve()
     expect(second.state(sid('s1')).getSnapshot().status).toBe('idle')
+  })
+
+  it('ignores a late stop failure after the start was superseded', async () => {
+    const stop = deferred<undefined>()
+    const deps = host()
+    deps.readPreviewDocument = vi.fn(async () => ({
+      path: '/w/page.html', format: 'html' as const, content: '<p>app</p>',
+    }))
+    const preview = new DocumentPreviewController(deps)
+    preview.open(sid('s1'), 'page.html')
+    await vi.waitFor(() => {
+      expect(preview.state(sid('s1')).getSnapshot().status).toBe('ready')
+    })
+    preview.enableInteractive(sid('s1'))
+    await vi.waitFor(() => {
+      expect(preview.state(sid('s1')).getSnapshot().grantId).toBe('grant-1')
+    })
+    deps.stopInteractivePreview = vi.fn(() => stop.promise)
+    preview.reload(sid('s1'))
+    await vi.waitFor(() => {
+      expect(deps.stopInteractivePreview).toHaveBeenCalled()
+    })
+    preview.dispose()
+    stop.reject(new Error('late stop'))
+    await Promise.resolve()
+    expect(preview.state(sid('s1')).getSnapshot().status).toBe('idle')
   })
 })

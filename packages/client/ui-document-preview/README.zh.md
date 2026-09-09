@@ -26,4 +26,4 @@ Markdown 通过 `MarkdownText` 渲染，并使用本包的 Mermaid 适配器（`
 - **静态模式不处理外链样式表和 CSS `url()` 资源** — 只改写内联 CSS 与栅格 `<img>` 来源。交互模式从隔离源上的入口 HTML 目录提供这些文件。
 - **已发布的 grant 是回环唯一主机名** — 改写 `Host` 的反向代理，或没有匹配通配 DNS 后缀的 TLS 终止，无法到达它们。远程浏览器需要组合 overlay（`bindHost: 0.0.0.0` 加上通配 `hostnameSuffix`）。
 
-**运行时不变量：** 不发布 companion。该类型只注册一个 Sidebar 标签定义和一处按 key 的正文；预览快照只存在于 UI，并在标签的 abort signal 触发时丢弃，没有第二份观察可对照。
+**运行时不变量：** 不发布 companion。该类型只注册一个 Sidebar 标签定义和一处按 key 的正文；预览快照只存在于 UI，并在标签页正文卸载或其 abort signal 触发时丢弃，没有第二份观察可对照。

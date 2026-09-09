@@ -115,6 +115,7 @@ export class DocumentPreviewController implements IDocumentPreview {
   private readonly blobs = new Map<string, string[]>()
   private readonly generations = new Map<string, number>()
   private readonly grants = new Map<string, InteractivePreviewId>()
+  private readonly pendingStops = new Set<InteractivePreviewId>()
   private readonly authorized = new Map<string, boolean>()
 
   constructor(private readonly host: DocumentPreviewHost) {}
@@ -146,7 +147,9 @@ export class DocumentPreviewController implements IDocumentPreview {
     this.abort(sessionId)
     this.revoke(sessionId)
     this.authorized.delete(sessionId as string)
-    void this.stopGrant(sessionId)
+    void this.stopGrant(sessionId)?.catch(() => {
+      // Host stop failed; the grant id stays mapped so close, dispose, or start can retry.
+    })
     this.state(sessionId).set(IDLE)
   }
 
@@ -193,7 +196,9 @@ export class DocumentPreviewController implements IDocumentPreview {
       this.abort(sessionId as SessionId)
       this.revoke(sessionId as SessionId)
       this.authorized.delete(sessionId)
-      void this.stopGrant(sessionId as SessionId)
+      void this.stopGrant(sessionId as SessionId)?.catch(() => {
+        // Host stop failed; the grant id stays mapped so a later dispose can retry.
+      })
     }
     this.stores.clear()
   }
@@ -213,14 +218,30 @@ export class DocumentPreviewController implements IDocumentPreview {
     this.blobs.delete(key)
   }
 
+  private async flushPendingStops(): Promise<void> {
+    for (const id of [...this.pendingStops]) {
+      try {
+        await this.host.stopInteractivePreview(id)
+        this.pendingStops.delete(id)
+      } catch {
+        // Orphan grant ids stay queued until a later close, dispose, or start retries.
+      }
+    }
+  }
+
   private stopGrant(sessionId: SessionId): Promise<void> | undefined {
     const key = sessionId as string
     const id = this.grants.get(key)
-    this.grants.delete(key)
+    if (id === undefined && this.pendingStops.size === 0) return
+    return this.revokeGrant(key, id)
+  }
+
+  private async revokeGrant(key: string, id: InteractivePreviewId | undefined): Promise<void> {
+    await this.flushPendingStops()
     if (id === undefined) return
-    return this.host.stopInteractivePreview(id).catch(() => {
-      // Close is idempotent; a failed stop still drops the local grant id.
-    })
+    await this.host.stopInteractivePreview(id)
+    this.grants.delete(key)
+    this.pendingStops.delete(id)
   }
 
   private async startGrant(sessionId: SessionId, path: string): Promise<void> {
@@ -235,7 +256,19 @@ export class DocumentPreviewController implements IDocumentPreview {
       interactiveError: null,
     })
     const stopping = this.stopGrant(sessionId)
-    if (stopping !== undefined) await stopping
+    if (stopping !== undefined) {
+      try {
+        await stopping
+      } catch (error: unknown) {
+        if (!this.current(key, generation, abort)) return
+        this.state(sessionId).set({
+          ...this.state(sessionId).getSnapshot(),
+          startingInteractive: false,
+          interactiveError: interactiveMessageOf(error),
+        })
+        return
+      }
+    }
     if (!this.current(key, generation, abort)) return
     try {
       const grant = await this.host.startInteractivePreview(
@@ -245,9 +278,11 @@ export class DocumentPreviewController implements IDocumentPreview {
         abort.signal,
       )
       if (!this.current(key, generation, abort)) {
-        await this.host.stopInteractivePreview(grant.id, abort.signal).catch(() => {
-          // The superseded grant is closed best-effort; later loads own the session.
-        })
+        try {
+          await this.host.stopInteractivePreview(grant.id, abort.signal)
+        } catch {
+          this.pendingStops.add(grant.id)
+        }
         return
       }
       this.grants.set(key, grant.id)
@@ -298,7 +333,11 @@ export class DocumentPreviewController implements IDocumentPreview {
     if (!retainInteractive) {
       const stopping = this.stopGrant(sessionId)
       if (stopping !== undefined) {
-        await stopping
+        try {
+          await stopping
+        } catch {
+          // Keep the mapped grant id; static preview can still load.
+        }
         if (!this.current(key, generation, abort)) return
       }
     }

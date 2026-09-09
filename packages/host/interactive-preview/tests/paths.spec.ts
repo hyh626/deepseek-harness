@@ -1,6 +1,6 @@
 /** Unit coverage for preview path resolution helpers. */
 
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
@@ -11,6 +11,7 @@ import {
   acceptsHtml,
   contentTypeForPath,
   hasTraversalSegments,
+  isPreviewEntryPath,
   rawPathname,
   resolvePreviewPath,
 } from '../src/paths.ts'
@@ -18,6 +19,16 @@ import {
 describe('rawPathname', () => {
   it('strips query and fragment without normalizing', () => {
     expect(rawPathname('/app.js?x=1#frag')).toBe('/app.js')
+  })
+})
+
+describe('isPreviewEntryPath', () => {
+  it('matches the grant root and entry basename only', () => {
+    expect(isPreviewEntryPath('/', 'index.html')).toBe(true)
+    expect(isPreviewEntryPath('/index.html', 'index.html')).toBe(true)
+    expect(isPreviewEntryPath('/app.js', 'index.html')).toBe(false)
+    expect(isPreviewEntryPath('/../index.html', 'index.html')).toBe(false)
+    expect(isPreviewEntryPath('/%E0%A4%A', 'index.html')).toBe(false)
   })
 })
 
@@ -62,14 +73,22 @@ describe('resolvePreviewPath', () => {
       const appRootPath = fs.processPath(appRoot)
       const signal = new AbortController().signal
 
-      expect(await resolvePreviewPath(fs, appRoot, appRootPath, 'index.html', '/', signal))
-        .toEqual({ kind: 'entry' })
+      const rootResolved = await resolvePreviewPath(fs, appRoot, appRootPath, 'index.html', '/', signal)
+      expect(rootResolved.kind).toBe('file')
+      if (rootResolved.kind === 'file') {
+        expect(fs.processPath(rootResolved.target)).toBe(join(appDir, 'index.html'))
+      }
       expect((await resolvePreviewPath(fs, appRoot, appRootPath, 'index.html', '/app.js', signal)).kind)
         .toBe('file')
       expect(await resolvePreviewPath(fs, appRoot, appRootPath, 'index.html', '/..%2foutside.txt', signal))
         .toEqual({ kind: 'traversal' })
       expect(await resolvePreviewPath(fs, appRoot, appRootPath, 'index.html', '/missing.js', signal))
         .toEqual({ kind: 'missing' })
+
+      rmSync(join(appDir, 'index.html'))
+      symlinkSync(join(root, 'outside.txt'), join(appDir, 'index.html'))
+      expect(await resolvePreviewPath(fs, appRoot, appRootPath, 'index.html', '/', signal))
+        .toEqual({ kind: 'traversal' })
     } finally {
       rmSync(root, { recursive: true, force: true })
     }

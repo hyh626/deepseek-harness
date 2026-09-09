@@ -8,6 +8,7 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import LocalFileSystem from '@deepseek-ai/dsh-fs-local'
+import { FsError } from '@deepseek-ai/dsh-fs'
 import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
 import InteractivePreview from '../src/service.ts'
 import { previewInternals, type PreviewGrantState } from './test-internals.ts'
@@ -176,5 +177,37 @@ describe('handleRequest stat behavior', () => {
     expect(res.destroy).toHaveBeenCalled()
     expect(res.writeHead).not.toHaveBeenCalled()
     expect(warn).not.toHaveBeenCalled()
+  })
+
+  it('destroys the response when SPA fallback resolve aborts', async () => {
+    const { preview, grantState, hostAuthority } = await bootWithGrant()
+    const internal = previewInternals(preview)
+    const originalResolve = context!.fs.resolve.bind(context!.fs)
+    vi.spyOn(context!.fs, 'resolve').mockImplementation(async (path, opts) => {
+      if (path === 'missing/route') throw new FsError('missing', 'FS_NOT_FOUND')
+      if (path === 'index.html') throw new DOMException('aborted', 'AbortError')
+      return await originalResolve(path, opts)
+    })
+    const req = mockRequest(hostAuthority, '/missing/route')
+    req.headers.accept = 'text/html'
+    const res = mockResponse()
+    await internal.handleRequest(grantState!, req, res)
+    expect(res.destroy).toHaveBeenCalled()
+    expect(res.writeHead).not.toHaveBeenCalled()
+  })
+
+  it('rethrows unexpected SPA fallback resolve failures', async () => {
+    const { preview, grantState, hostAuthority } = await bootWithGrant()
+    const internal = previewInternals(preview)
+    const originalResolve = context!.fs.resolve.bind(context!.fs)
+    vi.spyOn(context!.fs, 'resolve').mockImplementation(async (path, opts) => {
+      if (path === 'missing/route') throw new FsError('missing', 'FS_NOT_FOUND')
+      if (path === 'index.html') throw new Error('fallback resolve failed')
+      return await originalResolve(path, opts)
+    })
+    const req = mockRequest(hostAuthority, '/missing/route')
+    req.headers.accept = 'text/html'
+    await expect(internal.handleRequest(grantState!, req, mockResponse()))
+      .rejects.toThrow('fallback resolve failed')
   })
 })

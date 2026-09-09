@@ -2,31 +2,37 @@
  * Right-Sidebar tab body for workspace Markdown and static HTML preview.
  */
 
-import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Button, MarkdownText, RiskConfirmation, type MarkdownLabels } from '@deepseek-ai/dsh-client-ui-primitives'
-import type { PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
-import type { IDocumentPreview } from './controller.ts'
+import type { SnapshotStore } from '@deepseek-ai/dsh-client-store'
+import type { InjectFace, PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
+import type { DocumentPreviewView, IDocumentPreview } from './controller.ts'
 import { hostFileOf } from './rpc.ts'
 import { previewBasename } from './resources.ts'
 import { previewMermaidRenderer } from './mermaid.ts'
 import css from './DocumentPreviewPanel.module.css'
 
-/** Injected preview controller. */
+/** Injected preview controller and its per-session snapshot. */
 export interface DocumentPreviewInjected {
   /** Session-scoped preview loader. */
   preview: IDocumentPreview
+  /** Renderer-bound snapshot sources. */
+  hooks: {
+    /** Per-session preview snapshot bound by the renderer as usePreviewView. */
+    previewView: SnapshotStore<DocumentPreviewView>
+  }
 }
 
 /** Full tab props: session runtime share, injected controller, locale. */
 export type DocumentPreviewSlotProps =
-  PropsRuntime<'sidebar.right.pane.tab'> & DocumentPreviewInjected & PropsLocale<'documentPreview'>
+  PropsRuntime<'sidebar.right.pane.tab'> & InjectFace<DocumentPreviewInjected> & PropsLocale<'documentPreview'>
 
 /**
  * Render the document-preview tab body.
  * @param props - Tab runtime, preview controller, and localized copy.
  */
 export function DocumentPreviewPanel({
-  sessionId, preview, t, useTabInfo,
+  sessionId, preview, t, useTabInfo, usePreviewView,
 }: DocumentPreviewSlotProps) {
   const { tab } = useTabInfo()
   const file = useMemo(() => hostFileOf(tab.contentId, sessionId), [tab.contentId, sessionId])
@@ -35,14 +41,13 @@ export function DocumentPreviewPanel({
     const { signal } = tab
     const onAbort = (): void => { preview.close(file.sessionId) }
     signal.addEventListener('abort', onAbort)
-    return () => { signal.removeEventListener('abort', onAbort) }
+    return () => {
+      signal.removeEventListener('abort', onAbort)
+      preview.close(file.sessionId)
+    }
   }, [file, preview, tab.signal])
 
-  const store = preview.state(file.sessionId)
-  const view = useSyncExternalStore(
-    listener => store.subscribe(listener),
-    () => store.getSnapshot(),
-  )
+  const view = usePreviewView(snapshot => snapshot)
   const resolveImageSrc = useCallback((url: string) => view.imageUrls[url], [view.imageUrls])
   const mermaid = useMemo(() => previewMermaidRenderer, [])
   const labels = useMemo((): MarkdownLabels => ({

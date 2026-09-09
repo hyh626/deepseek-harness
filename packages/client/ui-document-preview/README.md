@@ -26,4 +26,4 @@ None; this package neither assembles nor sends a provider request.
 - **Linked stylesheets and CSS `url()` resources are omitted in static mode** — only inline CSS and raster `<img>` sources are rewritten. Interactive mode serves those files from the entry HTML directory on the isolated origin.
 - **Shipped grants are loopback unique hostnames** — a reverse proxy that rewrites `Host`, or TLS termination without a matching wildcard DNS suffix, cannot reach them. Remote browsers need a composition overlay (`bindHost: 0.0.0.0` plus a wildcard `hostnameSuffix`).
 
-**Runtime invariant:** No companion is published. The type registers one Sidebar tab definition and one keyed body; preview snapshots are UI-only and forgotten when the tab's abort signal fires, so there is no second observation to compare against.
+**Runtime invariant:** No companion is published. The type registers one Sidebar tab definition and one keyed body; preview snapshots are UI-only and forgotten when the tab body unmounts or its abort signal fires, so there is no second observation to compare against.
