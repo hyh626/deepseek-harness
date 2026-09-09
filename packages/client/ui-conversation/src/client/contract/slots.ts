@@ -721,8 +721,8 @@ export interface DetailsInjected {
   closeDetails: () => void
 }
 
-/** Full details-slot props: selection store, Tool output seat, injected close callback, and locale. */
-export type DetailsSlotProps = PropsRuntime<'details'> & PropsRenderSlots<'conversation.details.tool'>
+/** Full tool-details panel props: selection store, Tool output seat, injected close callback, and locale. */
+export type DetailsSlotProps = PropsRuntime<'secondaryPanel'> & PropsRenderSlots<'conversation.details.tool'>
   & PropsStore<ChatStore> & DetailsInjected & PropsLocale<'conversation'>
 
 /** Owner share common to the hero / New-Session Workspace pickers. */

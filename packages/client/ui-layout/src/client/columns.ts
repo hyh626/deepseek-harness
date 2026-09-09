@@ -1,20 +1,20 @@
 /**
  * Pure concession-chain column solver for the three-column AppFrame.
  * Chain order is fixed by contract: keep center >= CENTER_MIN by shrinking
- * details, then auto-closing it (derived zero width — preferred width
+ * secondary panel, then auto-closing it (derived zero width — preferred width
  * preferences are never rewritten, so widening the window restores them).
  * The sidebar never concedes: its rendered width is always the drag
  * preference (or the collapsed rail), and center absorbs any remaining
  * deficit as the last resort. Inputs are the layout store's plain width
  * preferences (0 = closed); a closed sidebar resolves to the fixed
- * SIDEBAR_COLLAPSED control rail while closed details resolve to zero width.
+ * SIDEBAR_COLLAPSED control rail while a closed secondary panel resolves to zero width.
  * The SIDEBAR_AUTO_COLLAPSE breakpoint is consumed by AppFrame, which decides
  * the effective sidebar preference before solving; the solver itself stays
  * breakpoint-free.
  */
 
 /** Resolved widths for one frame; center may drop below CENTER_MIN only at the final fallback. */
-export interface Columns { sidebar: number; center: number; details: number }
+export interface Columns { sidebar: number; center: number; secondary: number }
 
 // Contract-frozen geometry: the three-column concession chain's fixed points.
 /** Center column floor; only the final fallback may go below it. */
@@ -31,12 +31,10 @@ export const SIDEBAR_COLLAPSED = 56
  * LG breakpoint); a manual toggle below it re-expands over the squeezed center
  * (stores.ts narrowExpanded). */
 export const SIDEBAR_AUTO_COLLAPSE = 1024
-/** Details drag clamp floor. */
-export const DETAILS_MIN = 300
-/** Details drag clamp ceiling. */
-export const DETAILS_MAX = 520
-/** Details width before any user drag. */
-export const DETAILS_DEFAULT = 360
+/** Secondary-panel drag clamp floor. */
+export const SECONDARY_MIN = 300
+/** Secondary-panel width before any user drag. */
+export const SECONDARY_DEFAULT = 360
 
 /**
  * Clamp a panel width into its contract range.
@@ -50,28 +48,38 @@ export function clampWidth(px: number, min: number, max: number): number {
 }
 
 /**
+ * Normalize a requested secondary-panel width. The column solver applies the
+ * viewport-dependent ceiling needed to preserve {@link CENTER_MIN}.
+ * @param px - requested width.
+ * @returns the rounded width at or above the secondary-panel floor.
+ */
+export function normalizeSecondaryWidth(px: number): number {
+  return Math.max(SECONDARY_MIN, Math.round(px))
+}
+
+/**
  * Solve the three column widths for one viewport frame. Pure: no hysteresis —
  * the output is a function of (viewport, preferences) only, so recovery on
  * re-widening is automatic. Preferences re-clamp here because they cross the
  * store boundary and callers may still supply stale ranges.
  * @param viewport - available frame width in px.
  * @param sidebar - sidebar width preference in px (0 = closed).
- * @param details - details width preference in px (0 = closed).
- * @returns resolved widths; details 0 means visually closed (never unmounted), while a closed sidebar keeps its compact rail.
+ * @param secondary - secondary-panel width preference in px (0 = closed).
+ * @returns resolved widths; secondary 0 means visually closed, while a closed sidebar keeps its compact rail.
  */
-export function computeColumns(viewport: number, sidebar: number, details: number): Columns {
+export function computeColumns(viewport: number, sidebar: number, secondary: number): Columns {
   // The sidebar is fixed at its preference (or the rail) — it never concedes.
   const s = sidebar === 0 ? SIDEBAR_COLLAPSED : clampWidth(sidebar, SIDEBAR_MIN, SIDEBAR_MAX)
-  const d0 = details === 0 ? 0 : clampWidth(details, DETAILS_MIN, DETAILS_MAX)
+  const d0 = secondary === 0 ? 0 : normalizeSecondaryWidth(secondary)
 
   // Step 1: everything fits at preferred widths.
-  if (s + d0 + CENTER_MIN <= viewport) return { sidebar: s, center: viewport - s - d0, details: d0 }
+  if (s + d0 + CENTER_MIN <= viewport) return { sidebar: s, center: viewport - s - d0, secondary: d0 }
 
-  // Step 2: shrink details toward its minimum.
-  const d1 = d0 === 0 ? 0 : Math.max(DETAILS_MIN, viewport - s - CENTER_MIN)
-  if (s + d1 + CENTER_MIN <= viewport) return { sidebar: s, center: CENTER_MIN, details: d1 }
+  // Step 2: shrink the secondary panel toward its minimum.
+  const d1 = d0 === 0 ? 0 : Math.max(SECONDARY_MIN, viewport - s - CENTER_MIN)
+  if (s + d1 + CENTER_MIN <= viewport) return { sidebar: s, center: CENTER_MIN, secondary: d1 }
 
-  // Step 3: auto-close details (derived — preferences untouched); center
+  // Step 3: auto-close the secondary panel (derived — preferences untouched); center
   // absorbs any remaining deficit (may drop below CENTER_MIN).
-  return { sidebar: s, center: Math.max(0, viewport - s), details: 0 }
+  return { sidebar: s, center: Math.max(0, viewport - s), secondary: 0 }
 }

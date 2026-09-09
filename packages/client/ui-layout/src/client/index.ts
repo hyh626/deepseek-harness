@@ -21,6 +21,7 @@ import { ThemePresenter } from './theme-presenter.ts'
 // OwnerShare contracts below are the render-side halves registrants compose
 // against; the frame components and the store factory are package-internal.
 export { LayoutController } from './service.ts'
+export { LayoutPanelId } from './service.ts'
 export type { ILayout } from './service.ts'
 
 declare module '@deepseek-ai/cordis' {
@@ -61,15 +62,14 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
      */
     'conversation': { kind: 'single'; scope: 'session-maybe'; owner: ConvOwnerProps }
     /**
-     * The right details column, shown when the layout opens it. OCCUPIED by
-     * ui-conversation's DetailsPanel, which declares the tool-details seat
-     * inside it — registering here replaces the column and takes that seat
-     * with it. Absent an occupant the column renders nothing.
+     * Exclusive entries for the right secondary column. Every entry owns its
+     * complete panel chrome and registers a unique id; AppFrame renders only
+     * the id selected through `ctx.layout.openPanel`.
      *
      * No owner props: the framework injects the session id and hooks for the
      * `session` scope, and `ctx.layout` owns whether the column is open.
      */
-    'details': { kind: 'single'; scope: 'session'; owner: DetailsOwnerProps }
+    'secondaryPanel': { kind: 'list'; scope: 'session'; owner: SecondaryPanelOwnerProps }
     /**
      * Frame-wide floating layer, above every column and outside their scroll
      * containers. Deliberately generic and unowned by any feature: a badge, a
@@ -101,8 +101,8 @@ export interface SidebarOwnerProps {
 /** Conversation owner share: business state and actions belong to the registrant. */
 export interface ConvOwnerProps {}
 
-/** Details owner share: empty — sessionId arrives as a framework-standard prop. */
-export interface DetailsOwnerProps {}
+/** Secondary-panel owner share: empty — sessionId arrives as a framework-standard prop. */
+export interface SecondaryPanelOwnerProps {}
 
 /** Required services (cordis fiber inject — the loader passes all module exports as an object plugin). */
 export const inject = ['slots', 'theme']
@@ -114,7 +114,8 @@ export const inject = ['slots', 'theme']
  * @param ctx - client root context.
  */
 export function apply(ctx: ClientContext): void {
-  const layout = new LayoutController()
+  const layout = new LayoutController(id =>
+    ctx.slots.entries('secondaryPanel').some(entry => entry.options.id === id))
   ctx.effect(() => {
     const disposeService = ctx.reflect.provide('layout', layout)
     const disposeRegistration = ctx.slots.register({
@@ -122,7 +123,7 @@ export function apply(ctx: ClientContext): void {
       children: {
         'sidebar': { kind: 'single', scope: 'root' },
         'conversation': { kind: 'single', scope: 'session-maybe' },
-        'details': { kind: 'single', scope: 'session' },
+        'secondaryPanel': { kind: 'list', scope: 'session' },
         'shell.overlay': { kind: 'list', scope: 'root' },
       },
       // Exclusive store: the factory itself — the framework instantiates per
@@ -135,7 +136,11 @@ export function apply(ctx: ClientContext): void {
         return {}
       },
     }, AppFrame)
+    const disposePanelWatch = ctx.slots.subscribe('secondaryPanel', () => {
+      layout.reconcilePanels()
+    })
     return () => {
+      disposePanelWatch()
       disposeRegistration()
       // provide()'s disposer settles asynchronously; teardown is synchronous fire-and-forget.
       void disposeService()

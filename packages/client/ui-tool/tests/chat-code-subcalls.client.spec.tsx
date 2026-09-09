@@ -91,7 +91,7 @@ function snapshotWith(
 }
 
 /** Test-owned AppFrame role: declares and renders the resident conversation area. */
-type AppRootProps = PropsRenderSlots<'conversation' | 'details'>
+type AppRootProps = PropsRenderSlots<'conversation' | 'secondaryPanel'>
 function AppRoot({ renderSlot }: AppRootProps) {
   return <>{renderSlot('conversation', {})}</>
 }
@@ -116,7 +116,7 @@ async function bench(snapshot: ConversationSnapshot) {
     phase: 'ready', subagentsByParent: {}, jobsBySession: {}, currentAddress: undefined,
   })
   const scoped = { send: vi.fn(async () => {}), cancel: vi.fn(async () => {}) }
-  const layout = { openDetails: vi.fn(), closeDetails: vi.fn() }
+  const layout = { openPanel: vi.fn(), closePanel: vi.fn() }
   // Provide-channel contributions land in this bundle the way the runtime
   // materializes them; the renderer host serves it through provideInfo.
   const provided: { hooks: Record<string, unknown>; props: Record<string, unknown> } = { hooks: {}, props: {} }
@@ -171,7 +171,7 @@ async function bench(snapshot: ConversationSnapshot) {
     name: 'root',
     children: {
       'conversation': { kind: 'single', scope: 'session-maybe' },
-      'details': { kind: 'single', scope: 'session' },
+      'secondaryPanel': { kind: 'list', scope: 'session' },
     },
   }, AppRoot)
 
@@ -271,12 +271,12 @@ describe('run_code sub-calls through the real chat machinery', () => {
     const b = await bench(snapshotWith([codeResult(10, parent)], subCalls))
     const view = mountApp(b.slots)
     view.getByText('notes/demo.txt').click()
-    expect(b.layout.openDetails).not.toHaveBeenCalled()
+    expect(b.layout.openPanel).not.toHaveBeenCalled()
     await vi.waitFor(() => {
       expect(b.workspaces.openPath).toHaveBeenCalledWith('notes/demo.txt')
     })
     view.getByText('List notes').click()
-    expect(b.layout.openDetails).not.toHaveBeenCalled()
+    expect(b.layout.openPanel).not.toHaveBeenCalled()
   })
 
   it('a RUNNING run_code call nests its so-far dispatches under the spinner row', async () => {

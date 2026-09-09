@@ -159,6 +159,27 @@ function fakeApi(overrides: Partial<{ muxFrames: MuxFrame[]; hostFrames: HostFra
       async openPath(request) {
         return { rpcId: request.rpcId, result: { ok: true, value: { opened: true as const } } }
       },
+      async readPreviewDocument(request) {
+        return {
+          rpcId: request.rpcId,
+          result: { ok: true, value: { path: '/w/doc.md', format: 'markdown' as const, content: '# doc' } },
+        }
+      },
+      async readPreviewImage(request) {
+        return {
+          rpcId: request.rpcId,
+          result: { ok: true, value: { mediaType: 'image/png' as const, data: 'AA==' } },
+        }
+      },
+      async startInteractivePreview(request) {
+        return {
+          rpcId: request.rpcId,
+          result: { ok: true, value: { id: 'grant-1' as never, origin: 'http://abc.localhost:1' } },
+        }
+      },
+      async stopInteractivePreview(request) {
+        return { rpcId: request.rpcId, result: { ok: true, value: { stopped: true as const } } }
+      },
     },
     workspace: {
       async list(request) {

@@ -18,9 +18,16 @@ import type {} from '@deepseek-ai/dsh-agent-default-model'
 import type { ApiProxy } from './api/index.ts'
 import { createApiProxy, DEFAULT_COLD_BLANK_PROBE_MAX_BYTES } from './api-proxy.ts'
 import {
+  DEFAULT_PREVIEW_DOCUMENT_MAX_BYTES,
+  DEFAULT_PREVIEW_IMAGE_MAX_BYTES,
+} from './preview-read.ts'
+import {
   DEFAULT_SESSION_LOG_COMPRESSION_LEVEL,
   type SessionLogCompressionLevel,
 } from './session-export.ts'
+
+export { interactivePreviewRpcError } from './interactive-preview-rpc.ts'
+export type { InteractivePreviewRpcContext } from './interactive-preview-rpc.ts'
 
 export type * from './api/index.ts'
 export { RpcId } from './api/rpc.ts'
@@ -59,6 +66,16 @@ export interface Config {
    * @default 1024
    */
   coldBlankProbeMaxBytes?: number
+  /**
+   * Maximum UTF-8 byte size of one preview document read.
+   * @default 2097152
+   */
+  previewDocumentMaxBytes?: number
+  /**
+   * Maximum byte size of one preview image read.
+   * @default 5242880
+   */
+  previewImageMaxBytes?: number
 }
 
 /**
@@ -77,6 +94,8 @@ export class ApiProxyService extends Service implements ApiProxy {
     sessionExportCompressionLevel: z.number().step(1).min(0).max(9)
       .default(DEFAULT_SESSION_LOG_COMPRESSION_LEVEL) as z<SessionLogCompressionLevel>,
     coldBlankProbeMaxBytes: z.natural().default(DEFAULT_COLD_BLANK_PROBE_MAX_BYTES),
+    previewDocumentMaxBytes: z.natural().default(DEFAULT_PREVIEW_DOCUMENT_MAX_BYTES),
+    previewImageMaxBytes: z.natural().default(DEFAULT_PREVIEW_IMAGE_MAX_BYTES),
   })
 
   readonly sessions: ApiProxy['sessions']
@@ -106,6 +125,12 @@ export class ApiProxyService extends Service implements ApiProxy {
       ...(config.coldBlankProbeMaxBytes === undefined
         ? {}
         : { coldBlankProbeMaxBytes: config.coldBlankProbeMaxBytes }),
+      ...(config.previewDocumentMaxBytes === undefined
+        ? {}
+        : { previewDocumentMaxBytes: config.previewDocumentMaxBytes }),
+      ...(config.previewImageMaxBytes === undefined
+        ? {}
+        : { previewImageMaxBytes: config.previewImageMaxBytes }),
     })
     this.sessions = api.sessions
     this.subagents = api.subagents

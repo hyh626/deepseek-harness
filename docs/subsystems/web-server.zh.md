@@ -2,7 +2,7 @@
 
 [English](web-server.md) | 中文
 
-[dsh-host-webserver](../../packages/host/webserver) 是 GUI 宿主的浏览器 HTTP 载体：它是一个提供 `ctx.webServer` 的 `node:http` 插件，包含具名路由注册表、index.html 转换回调，以及一个可由插件认领的回退处理器。它不属于 agent loop（智能体循环），也不是能力 seam；它不了解任何 harness 概念。其他插件负责注册所有功能路由，包括 `/api` 桥接、插件 bundle 和 HMR（热模块替换）事件流（[分层说明](../../.agents/notes/implemented/architecture/2026-07-19-gui-layering-and-rpc-protocol.md)）。该服务器只服务浏览器：Electron 通过 `file://` 加载已构建文件，并经 IPC 桥接发送 fetch 请求，不使用本服务器。
+[dsh-host-webserver](../../packages/host/webserver) 是 GUI 宿主的浏览器 HTTP 载体：它是一个提供 `ctx.webServer` 的 `node:http` 插件，包含具名路由注册表、index.html 转换回调，以及一个可由插件认领的回退处理器。它不属于 agent loop（智能体循环），也不是能力 seam；它不了解任何 harness 概念。其他插件负责注册所有功能路由，包括 `/api` 桥接、插件 bundle 和 HMR（热模块替换）事件流（[分层说明](../../.agents/notes/implemented/architecture/2026-07-19-gui-layering-and-rpc-protocol.md)）。该服务器只服务浏览器：Electron 通过 `file://` 加载已构建文件，并经 IPC 桥接发送 fetch 请求，不使用本服务器。唯一源交互 HTML 预览（`ctx.interactivePreview`）是独立的按 grant HTTP 监听器；[该包 README](../../packages/host/interactive-preview/README.md) 拥有 grant 语义。
 
 源码：[`packages/host/webserver/src/index.ts`](../../packages/host/webserver/src/index.ts)
 
@@ -53,6 +53,29 @@ interface Config {
 ## Cordis API
 
 Generated from source by `scripts/gen-cordis-catalog.ts` (verified fresh by `pnpm run verify-cordis-catalog` in doc-sync; regenerate with `pnpm run gen-cordis-catalog`) — this section is byte-identical in both language sides of the page. Signature blocks use a `ts cordis-catalog` fence and keep the original source JSDoc; dispatch modes are defined in the [primer](../cordis-primer.md#dispatch-modes), and the framework-inherited `ctx` API lives in [cordis-api/inherited.md](../cordis-api/inherited.md).
+
+<a id="ctxinteractivepreview--interactivepreview"></a>
+
+### `ctx.interactivePreview` — `InteractivePreview`
+
+Mint ephemeral capability-hostname preview origins backed by session workspace files.
+
+```ts cordis-catalog
+/**
+ * Open one preview grant for a session HTML entry.
+ * @param options - session id, entry path, and trusted parent origin.
+ * @returns the grant id and complete HTTP origin.
+ */
+async open(options: OpenInteractivePreviewOptions): Promise<InteractivePreviewGrant>
+
+/**
+ * Close one preview grant idempotently.
+ * @param id - grant to close.
+ */
+async close(id: InteractivePreviewId): Promise<void>
+```
+
+Source: [`packages/host/interactive-preview/src/service.ts:113`](../../packages/host/interactive-preview/src/service.ts)
 
 <a id="ctxwebserver--webserver"></a>
 

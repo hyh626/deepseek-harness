@@ -19,7 +19,11 @@ import {
   collectReferenceTargets, createReferenceTargets, renderBlocks, renderFootnoteSection,
   wrapBlockChildren,
 } from './render.tsx'
-import type { MarkdownCodeLabels, MarkdownFileMentions, MarkdownRenderContext, ReferenceTargets } from './render.tsx'
+import type {
+  MarkdownCodeLabels, MarkdownFileMentions, MarkdownRenderContext, MermaidRenderer, ReferenceTargets,
+} from './render.tsx'
+
+export type { MermaidRenderer } from './render.tsx'
 import 'katex/dist/katex.min.css'
 import css from './MarkdownText.module.css'
 
@@ -30,6 +34,9 @@ function renderSettled(
   text: string,
   codeLabels: MarkdownCodeLabels | undefined,
   fileMentions: MarkdownFileMentions | undefined,
+  mermaid: MermaidRenderer | undefined,
+  mermaidErrorLabel: string | undefined,
+  resolveImageSrc: ((url: string) => string | undefined) | undefined,
 ): ReactNode[] {
   const root = parseGfmWithMath(text)
   const targets = createReferenceTargets()
@@ -38,6 +45,9 @@ function renderSettled(
     streaming: false,
     codeLabels,
     fileMentions,
+    mermaid,
+    mermaidErrorLabel,
+    resolveImageSrc,
     targets,
     footnoteOrder: [],
     footnoteCounts: new Map(),
@@ -102,6 +112,9 @@ class StreamingRenderer {
         streaming: true,
         codeLabels: this.codeLabels,
         fileMentions: undefined,
+        mermaid: undefined,
+        mermaidErrorLabel: undefined,
+        resolveImageSrc: undefined,
         targets: frameTargets,
         footnoteOrder: this.frozenFootnoteOrder,
         footnoteCounts: this.frozenFootnoteCounts,
@@ -120,6 +133,9 @@ class StreamingRenderer {
       streaming: true,
       codeLabels: this.codeLabels,
       fileMentions: undefined,
+      mermaid: undefined,
+      mermaidErrorLabel: undefined,
+      resolveImageSrc: undefined,
       targets: frameTargets,
       footnoteOrder: [...this.frozenFootnoteOrder],
       footnoteCounts: new Map(this.frozenFootnoteCounts),
@@ -148,29 +164,37 @@ class StreamingRenderer {
  * links inline-code tokens its resolver recognizes as real files; this is
  * the single streaming gate — it applies to settled renders only, because a
  * streaming message's vocabulary is not final and frozen cached elements
- * must not bake in handlers that could go stale.
+ * must not bake in handlers that could go stale. `mermaid` turns settled
+ * `mermaid` fences into SVG blob images; omit it to keep generic CodeBlock
+ * output. `mermaidErrorLabel` is the failure copy shown above a retained
+ * source fence.
  * @returns A GFM document with TeX math rendered through KaTeX; raw HTML,
  * relative links, and unsafe protocols are disabled, while absolute HTTP(S)
  * images render directly.
  */
-export const MarkdownText = memo(function MarkdownText({ text, streaming = false, codeLabels, fileMentions }: {
+export const MarkdownText = memo(function MarkdownText({
+  text, streaming = false, codeLabels, fileMentions, mermaid, mermaidErrorLabel, resolveImageSrc,
+}: {
   text: string
   streaming?: boolean
   codeLabels?: MarkdownCodeLabels | undefined
   fileMentions?: MarkdownFileMentions | undefined
+  mermaid?: MermaidRenderer | undefined
+  mermaidErrorLabel?: string | undefined
+  resolveImageSrc?: ((url: string) => string | undefined) | undefined
 }) {
   const streamRef = useRef<StreamingRenderer | null>(null)
   const streamLabelsRef = useRef<MarkdownCodeLabels | undefined>(codeLabels)
   const children = useMemo(() => {
     if (!streaming) {
       streamRef.current = null
-      return renderSettled(text, codeLabels, fileMentions)
+      return renderSettled(text, codeLabels, fileMentions, mermaid, mermaidErrorLabel, resolveImageSrc)
     }
     if (streamRef.current === null || streamLabelsRef.current !== codeLabels) {
       streamRef.current = new StreamingRenderer(codeLabels)
       streamLabelsRef.current = codeLabels
     }
     return streamRef.current.render(text)
-  }, [text, streaming, codeLabels, fileMentions])
+  }, [text, streaming, codeLabels, fileMentions, mermaid, mermaidErrorLabel, resolveImageSrc])
   return <div className={css.markdown}>{children}</div>
 })

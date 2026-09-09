@@ -716,6 +716,24 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     ],
   },
   {
+    key: 'interactivePreview',
+    summary: 'Mint ephemeral capability-hostname preview origins backed by session workspace files.',
+    description: 'Mint ephemeral capability-hostname preview origins backed by session workspace files.',
+    methods: [
+      {
+        signature: 'async open(options: OpenInteractivePreviewOptions): Promise<InteractivePreviewGrant>',
+        description: 'Open one preview grant for a session HTML entry.',
+        parameters: [{ name: 'options', description: 'session id, entry path, and trusted parent origin.' }],
+        returns: 'the grant id and complete HTTP origin.',
+      },
+      {
+        signature: 'async close(id: InteractivePreviewId): Promise<void>',
+        description: 'Close one preview grant idempotently.',
+        parameters: [{ name: 'id', description: 'grant to close.' }],
+      },
+    ],
+  },
+  {
     key: 'invariants',
     summary: 'Package-owned invariant registry with global and regex-based selection.',
     description: 'Package-owned invariant registry with global and regex-based selection.',
@@ -3478,6 +3496,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'OneShotSubagentDescriptorData',
     declaration: 'export interface OneShotSubagentDescriptorData extends SubagentDescriptorBase {\n    readonly mode: \'one-shot\';\n    readonly label?: string;\n}',
+  },
+  {
+    name: 'OpenInteractivePreviewOptions',
+    declaration: 'export interface OpenInteractivePreviewOptions {\n    sessionId: SessionId;\n    path: string;\n    parentOrigin: string;\n}',
   },
   {
     name: 'PermissionSelect',

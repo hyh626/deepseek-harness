@@ -752,10 +752,20 @@ export interface Config {
    * @default 1024
    */
   coldBlankProbeMaxBytes?: number
+  /**
+   * Maximum UTF-8 byte size of one preview document read.
+   * @default 2097152
+   */
+  previewDocumentMaxBytes?: number
+  /**
+   * Maximum byte size of one preview image read.
+   * @default 5242880
+   */
+  previewImageMaxBytes?: number
 }
 ```
 
-来源：[`packages/host/apiproxy/src/index.ts:41`](../packages/host/apiproxy/src/index.ts)
+来源：[`packages/host/apiproxy/src/index.ts:45`](../packages/host/apiproxy/src/index.ts)
 
 <a id="deepseek-aidsh-host-directory-picker-browse"></a>
 
@@ -786,6 +796,30 @@ export interface Config {
 ```
 
 来源：[`packages/host/frontend-static/src/index.ts:28`](../packages/host/frontend-static/src/index.ts)
+
+<a id="deepseek-aidsh-host-interactive-preview"></a>
+
+## `@deepseek-ai/dsh-host-interactive-preview`
+
+需要：`sessions` · `fs`
+
+```ts config-catalog
+/** Plugin config: bind address, hostname suffix, and per-grant limits. */
+export interface Config {
+  /** Listen address for every grant server. */
+  bindHost: '127.0.0.1' | '0.0.0.0'
+  /** DNS suffix appended to each grant capability label (`<capability>.<suffix>`). */
+  hostnameSuffix: string
+  /** Maximum concurrent live grants for this plugin instance. */
+  maxGrants: number
+  /** Maximum bytes for one served asset body. */
+  maxAssetBytes: number
+  /** Milliseconds of authorized-request inactivity before a grant closes. */
+  inactivityTimeoutMs: number
+}
+```
+
+来源：[`packages/host/interactive-preview/src/service.ts:52`](../packages/host/interactive-preview/src/service.ts)
 
 <a id="deepseek-aidsh-host-webserver"></a>
 
@@ -3040,6 +3074,7 @@ export interface Config {
 - `@deepseek-ai/dsh-client-ui-deliverables` — 需要 `systemPrompt`（[`packages/client/ui-deliverables/src/index.ts`](../packages/client/ui-deliverables/src/index.ts)）
 - `@deepseek-ai/dsh-client-ui-directory-picker-browse`（[`packages/client/ui-directory-picker-browse/src/index.ts`](../packages/client/ui-directory-picker-browse/src/index.ts)）
 - `@deepseek-ai/dsh-client-ui-directory-picker-native`（[`packages/client/ui-directory-picker-native/src/index.ts`](../packages/client/ui-directory-picker-native/src/index.ts)）
+- `@deepseek-ai/dsh-client-ui-document-preview`（[`packages/client/ui-document-preview/src/index.ts`](../packages/client/ui-document-preview/src/index.ts)）
 - `@deepseek-ai/dsh-client-ui-goal`（[`packages/client/ui-goal/src/index.ts`](../packages/client/ui-goal/src/index.ts)）
 - `@deepseek-ai/dsh-client-ui-input-trigger`（[`packages/client/ui-input-trigger/src/index.ts`](../packages/client/ui-input-trigger/src/index.ts)）
 - `@deepseek-ai/dsh-client-ui-jobs`（[`packages/client/ui-jobs/src/index.ts`](../packages/client/ui-jobs/src/index.ts)）
@@ -3090,6 +3125,7 @@ export interface Config {
 - `@deepseek-ai/dsh-tool-call-timeout-policy` — 需要 `tools`（[`packages/guard/timeout-policy/src/index.ts`](../packages/guard/timeout-policy/src/index.ts)）
 - `@deepseek-ai/dsh-tool-cordis` — 需要 `tools` · `systemPrompt` · `dynamicCordisRunner` · `cordisInspect`（[`packages/extensions/tool-cordis/src/index.ts`](../packages/extensions/tool-cordis/src/index.ts)）
 - `@deepseek-ai/dsh-tool-subagent-control` — 需要 `tools` · `subagents`（[`packages/subagent/tool-subagent-control/src/index.ts`](../packages/subagent/tool-subagent-control/src/index.ts)）
+- `@deepseek-ai/dsh-typert-registry`（[`packages/typert/registry/src/index.ts`](../packages/typert/registry/src/index.ts)）
 - `@deepseek-ai/dsh-user-questions`（[`packages/interaction/user-questions/src/index.ts`](../packages/interaction/user-questions/src/index.ts)）
 - `@deepseek-ai/dsh-workspace` — 需要 `storageDomain` · `sessionPersistence`（[`packages/workspace/workspace/src/index.ts`](../packages/workspace/workspace/src/index.ts)）
 
@@ -3149,4 +3185,3 @@ export interface Config {
 - `@deepseek-ai/dsh-timeout`（[`packages/util/timeout/src/index.ts`](../packages/util/timeout/src/index.ts)）
 - `@deepseek-ai/dsh-typert-generator`（[`packages/typert/generator/src/index.ts`](../packages/typert/generator/src/index.ts)）
 - `@deepseek-ai/dsh-typert-protocol`（[`packages/typert/protocol/src/index.ts`](../packages/typert/protocol/src/index.ts)）
-- `@deepseek-ai/dsh-typert-registry`（[`packages/typert/registry/src/index.ts`](../packages/typert/registry/src/index.ts)）

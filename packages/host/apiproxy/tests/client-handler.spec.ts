@@ -78,6 +78,10 @@ function scriptedApi(overrides: {
       listDirectory: r => ok(r, { path: '/t', home: '/t', crumbs: [], entries: [], truncated: false }),
       createDirectory: r => ok(r, { path: '/t/new' }),
       openPath: r => ok(r, { opened: true as const }),
+      readPreviewDocument: r => ok(r, { path: '/t/doc.md', format: 'markdown', content: '# doc' }),
+      readPreviewImage: r => ok(r, { mediaType: 'image/png', data: 'AA==' }),
+      startInteractivePreview: r => ok(r, { id: 'grant-1' as never, origin: 'http://abc.localhost:1' }),
+      stopInteractivePreview: r => ok(r, { stopped: true as const }),
       ...overrides.host,
     },
     workspace: {

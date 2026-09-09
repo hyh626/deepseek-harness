@@ -1,7 +1,15 @@
 /** Test-owned workspaces face: the renderer standard-kit observable plus recorded actions. */
 import { createSnapshotStore } from '@deepseek-ai/dsh-client-runtime/client'
 import type {
-  DirectoryListing, IWorkspaces, SessionId, SnapshotStore, WorkspaceId, WorkspaceListState, WorkspaceView,
+  DirectoryListing,
+  InteractivePreviewGrant,
+  InteractivePreviewId,
+  IWorkspaces,
+  SessionId,
+  SnapshotStore,
+  WorkspaceId,
+  WorkspaceListState,
+  WorkspaceView,
 } from '@deepseek-ai/dsh-client-runtime/client'
 import { workspaceListState } from './fixtures.ts'
 import type { Stabilizer } from './fixtures.ts'
@@ -95,6 +103,77 @@ export class TestWorkspaces implements IWorkspaces {
   async openPath(path: string): Promise<void> {
     this.calls.push({ method: 'openPath', args: [path] })
     await (this.stubs.get('openPath')?.(path) as Promise<void> | undefined)
+  }
+
+  /**
+   * Read one preview document (recorded). The default serves a minimal markdown doc.
+   * @param sessionId - addressed session.
+   * @param path - document path.
+   * @param signal - optional abort forwarded to stubs.
+   */
+  async readPreviewDocument(
+    sessionId: SessionId,
+    path: string,
+    signal?: AbortSignal,
+  ): Promise<{ path: string; format: 'markdown' | 'html'; content: string }> {
+    this.calls.push({ method: 'readPreviewDocument', args: [sessionId, path, signal] })
+    const stub = this.stubs.get('readPreviewDocument')
+    if (stub !== undefined) {
+      return await (stub(sessionId, path, signal) as Promise<{ path: string; format: 'markdown' | 'html'; content: string }>)
+    }
+    return { path, format: 'markdown', content: '# preview' }
+  }
+
+  /**
+   * Read one preview image (recorded). The default serves a minimal PNG payload.
+   * @param sessionId - addressed session.
+   * @param documentPath - preview document path used as the relative base.
+   * @param source - image source relative to the document directory unless absolute.
+   * @param signal - optional abort forwarded to stubs.
+   */
+  async readPreviewImage(
+    sessionId: SessionId,
+    documentPath: string,
+    source: string,
+    signal?: AbortSignal,
+  ): Promise<{ mediaType: 'image/png'; data: string }> {
+    this.calls.push({ method: 'readPreviewImage', args: [sessionId, documentPath, source, signal] })
+    const stub = this.stubs.get('readPreviewImage')
+    if (stub !== undefined) {
+      return await (stub(sessionId, documentPath, source, signal) as Promise<{ mediaType: 'image/png'; data: string }>)
+    }
+    return { mediaType: 'image/png', data: 'AA==' }
+  }
+
+  /**
+   * Start interactive preview (recorded). The default serves a minimal grant.
+   * @param sessionId - addressed session.
+   * @param path - entry HTML path.
+   * @param parentOrigin - trusted parent origin.
+   * @param signal - optional abort forwarded to stubs.
+   */
+  async startInteractivePreview(
+    sessionId: SessionId,
+    path: string,
+    parentOrigin: string,
+    signal?: AbortSignal,
+  ): Promise<InteractivePreviewGrant> {
+    this.calls.push({ method: 'startInteractivePreview', args: [sessionId, path, parentOrigin, signal] })
+    const stub = this.stubs.get('startInteractivePreview')
+    if (stub !== undefined) {
+      return await (stub(sessionId, path, parentOrigin, signal) as Promise<InteractivePreviewGrant>)
+    }
+    return { id: 'preview-grant' as InteractivePreviewId, origin: 'http://abc.localhost:1' }
+  }
+
+  /**
+   * Stop interactive preview (recorded; default no-op).
+   * @param id - grant to close.
+   * @param signal - optional abort forwarded to stubs.
+   */
+  async stopInteractivePreview(id: InteractivePreviewId, signal?: AbortSignal): Promise<void> {
+    this.calls.push({ method: 'stopInteractivePreview', args: [id, signal] })
+    await (this.stubs.get('stopInteractivePreview')?.(id, signal) as Promise<void> | undefined)
   }
 
   /**

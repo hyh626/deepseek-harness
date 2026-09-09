@@ -3,7 +3,12 @@
  * together; introduce protocolVersion only when an independently released client appears.
  */
 
+import type { Branded } from '@deepseek-ai/dsh-brand'
+import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type { RpcRequest, RpcResponse } from './rpc.ts'
+
+/** Opaque interactive preview grant id. */
+export type InteractivePreviewId = Branded<'InteractivePreviewId'>
 
 /** One directory row of a listing: a child entry or a breadcrumb ancestor. */
 export interface DirectoryEntry {
@@ -93,4 +98,46 @@ export interface HostApi {
     request: RpcRequest<{ path: string }>,
     signal: AbortSignal,
   ): Promise<RpcResponse<{ opened: true }>>
+
+  /**
+   * Read one Markdown or HTML document confined to the addressed session cwd.
+   * The host resolves canonical targets through `ctx.fs`, rejects traversal and
+   * symlink escape, and enforces configured complete-result bounds.
+   */
+  readPreviewDocument(
+    request: RpcRequest<{ sessionId: import('@deepseek-ai/dsh-session/types').SessionId; path: string }>,
+    signal: AbortSignal,
+  ): Promise<RpcResponse<{ path: string; format: 'markdown' | 'html'; content: string }>>
+
+  /**
+   * Read one contained raster image relative to a preview document directory.
+   * Only PNG, JPEG, WebP, and GIF are supported; `data` is base64 on the wire.
+   */
+  readPreviewImage(
+    request: RpcRequest<{
+      sessionId: SessionId
+      documentPath: string
+      source: string
+    }>,
+    signal: AbortSignal,
+  ): Promise<RpcResponse<{ mediaType: import('@deepseek-ai/dsh-attachment').ImageMediaType; data: string }>>
+
+  /**
+   * Mint one ephemeral interactive preview origin for a session HTML entry.
+   * The composed `ctx.interactivePreview` provider owns grant lifecycle;
+   * absent provider fails with `preview-unavailable`.
+   */
+  startInteractivePreview(
+    request: RpcRequest<{ sessionId: SessionId; path: string; parentOrigin: string }>,
+    signal: AbortSignal,
+  ): Promise<RpcResponse<{ id: InteractivePreviewId; origin: string }>>
+
+  /**
+   * Close one interactive preview grant idempotently. Unknown ids still report
+   * `{ stopped: true }` once the provider accepts the close.
+   */
+  stopInteractivePreview(
+    request: RpcRequest<{ id: InteractivePreviewId }>,
+    signal: AbortSignal,
+  ): Promise<RpcResponse<{ stopped: true }>>
 }

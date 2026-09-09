@@ -24,7 +24,7 @@ async function bench() {
   const slots = ctx.get('slots') as SlotRegistry
   ctx.provide('sessions', new TestSessions(stabilize, ctx))
   ctx.provide('workspaces', new TestWorkspaces(stabilize))
-  ctx.provide('layout', { openDetails: vi.fn(), closeDetails: vi.fn() })
+  ctx.provide('layout', { openPanel: vi.fn(), closePanel: vi.fn() })
   const fiber = ctx.plugin({ inject: [...AppShell.inject], apply: AppShell.apply })
   await fiber.await()
   return { ctx, slots, fiber }

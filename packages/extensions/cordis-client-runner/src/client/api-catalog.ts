@@ -92,14 +92,14 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         parameters: [],
       },
       {
-        signature: 'openDetails(): void',
-        description: 'Open the details panel (no-op when already open).',
-        parameters: [],
+        signature: 'openPanel(id: LayoutPanelId): void',
+        description: 'Open a registered secondary panel, replacing any active entry.',
+        parameters: [{ name: 'id', description: 'registered panel id.' }],
       },
       {
-        signature: 'closeDetails(): void',
-        description: 'Close the details panel.',
-        parameters: [],
+        signature: 'closePanel(id: LayoutPanelId): void',
+        description: 'Close the secondary panel only when the caller owns the active id.',
+        parameters: [{ name: 'id', description: 'caller\'s panel id.' }],
       },
     ],
   },
@@ -580,6 +580,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'KnownContextForm',
     declaration: 'export type KnownContextForm = typeof KNOWN_FORMS[number];',
+  },
+  {
+    name: 'LayoutPanelId',
+    declaration: 'export type LayoutPanelId = Branded<\'LayoutPanelId\'>;',
   },
   {
     name: 'LegacyConversationSlice',

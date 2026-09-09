@@ -6,20 +6,29 @@
  * real engine instance (same create path as production).
  */
 import { beforeEach, describe, expect, it } from 'vitest'
+import type { LayoutPanelId } from '@deepseek-ai/dsh-client-ui-layout/client'
 import { createLayoutStore } from '@deepseek-ai/dsh-client-ui-layout/src/client/stores.ts'
 import {
-  DETAILS_DEFAULT, DETAILS_MAX, DETAILS_MIN,
+  SECONDARY_DEFAULT, SECONDARY_MIN,
   SIDEBAR_DEFAULT, SIDEBAR_MAX, SIDEBAR_MIN,
 } from '@deepseek-ai/dsh-client-ui-layout/src/client/columns.ts'
 
 const PERSIST_KEY = 'dsh.layout.panels'
+const PANEL_A = 'panel-a' as LayoutPanelId
+const PANEL_B = 'panel-b' as LayoutPanelId
 
 beforeEach(() => { localStorage.clear() })
 
 describe('createLayoutStore', () => {
-  it('initializes the sidebar at its default width, details closed, wide viewport assumed', () => {
+  it('initializes the sidebar at its default width, secondary panel closed, wide viewport assumed', () => {
     const { store } = createLayoutStore().create()
-    expect(store.getSnapshot()).toEqual({ sidebar: SIDEBAR_DEFAULT, details: 0, narrow: false, narrowExpanded: false })
+    expect(store.getSnapshot()).toEqual({
+      sidebar: SIDEBAR_DEFAULT,
+      secondary: 0,
+      activePanel: null,
+      narrow: false,
+      narrowExpanded: false,
+    })
   })
 
   it('each create() is an independent instance (factory is not a singleton)', () => {
@@ -29,16 +38,16 @@ describe('createLayoutStore', () => {
     expect(b.store.getSnapshot().sidebar).toBe(SIDEBAR_DEFAULT)
   })
 
-  it('setSidebar/setDetails clamp into the contract ranges', () => {
+  it('setSidebar clamps its range while setSecondary keeps widths above its floor', () => {
     const { store, actions } = createLayoutStore().create()
     actions.setSidebar(1)
     expect(store.getSnapshot().sidebar).toBe(SIDEBAR_MIN)
     actions.setSidebar(9999)
     expect(store.getSnapshot().sidebar).toBe(SIDEBAR_MAX)
-    actions.setDetails(1)
-    expect(store.getSnapshot().details).toBe(DETAILS_MIN)
-    actions.setDetails(9999)
-    expect(store.getSnapshot().details).toBe(DETAILS_MAX)
+    actions.setSecondary(1)
+    expect(store.getSnapshot().secondary).toBe(SECONDARY_MIN)
+    actions.setSecondary(9999)
+    expect(store.getSnapshot().secondary).toBe(9999)
   })
 
   it('toggleSidebar flips closed <-> contract default (drag width forgotten)', () => {
@@ -55,7 +64,13 @@ describe('createLayoutStore', () => {
     actions.setSidebar(400)
     actions.setNarrow(true)
     actions.toggleSidebar()
-    expect(store.getSnapshot()).toEqual({ sidebar: 400, details: 0, narrow: true, narrowExpanded: true })
+    expect(store.getSnapshot()).toEqual({
+      sidebar: 400,
+      secondary: 0,
+      activePanel: null,
+      narrow: true,
+      narrowExpanded: true,
+    })
     actions.toggleSidebar()
     expect(store.getSnapshot().narrowExpanded).toBe(false)
     expect(store.getSnapshot().sidebar).toBe(400)
@@ -74,28 +89,33 @@ describe('createLayoutStore', () => {
     expect(store.getSnapshot().narrowExpanded).toBe(false)
   })
 
-  it('openDetails uses the contract default, preserves an open width, and closeDetails zeroes', () => {
+  it('opens exclusively, retains width, and lets only the active owner close', () => {
     const { store, actions } = createLayoutStore().create()
-    actions.openDetails()
-    expect(store.getSnapshot().details).toBe(DETAILS_DEFAULT)
-    actions.setDetails(500)
-    actions.openDetails()
-    expect(store.getSnapshot().details).toBe(500)
-    actions.closeDetails()
-    expect(store.getSnapshot().details).toBe(0)
+    actions.openPanel(PANEL_A)
+    expect(store.getSnapshot()).toMatchObject({ activePanel: PANEL_A, secondary: SECONDARY_DEFAULT })
+    actions.setSecondary(500)
+    actions.openPanel(PANEL_B)
+    expect(store.getSnapshot()).toMatchObject({ activePanel: PANEL_B, secondary: 500 })
+    actions.closePanel(PANEL_A)
+    expect(store.getSnapshot().activePanel).toBe(PANEL_B)
+    actions.closePanel(PANEL_B)
+    expect(store.getSnapshot()).toMatchObject({ activePanel: null, secondary: 500 })
+    actions.openPanel(PANEL_A)
+    expect(store.getSnapshot()).toMatchObject({ activePanel: PANEL_A, secondary: 500 })
   })
 
   it('does not persist panel geometry', () => {
     const first = createLayoutStore().create()
     first.actions.setSidebar(400)
-    first.actions.openDetails()
-    first.actions.setDetails(500)
+    first.actions.openPanel(PANEL_A)
+    first.actions.setSecondary(500)
     expect(localStorage.getItem(PERSIST_KEY)).toBeNull()
 
     const second = createLayoutStore().create()
     expect(second.store.getSnapshot()).toEqual({
       sidebar: SIDEBAR_DEFAULT,
-      details: 0,
+      secondary: 0,
+      activePanel: null,
       narrow: false,
       narrowExpanded: false,
     })

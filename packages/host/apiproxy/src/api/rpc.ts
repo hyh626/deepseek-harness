@@ -92,6 +92,22 @@ export interface RpcErrorDetailsMap {
   'subagent-not-resumable': { childSessionId: SessionId }
   'subagent-unauthorized': { childSessionId: SessionId }
   'subagent-delivery-unavailable': { childSessionId: SessionId }
+  'preview-session-not-found': { sessionId: SessionId }
+  'preview-session-no-cwd': { sessionId: SessionId }
+  'preview-entry-not-found': { path: string }
+  'preview-entry-not-file': { path: string }
+  'preview-entry-not-html': { path: string }
+  'preview-invalid-parent-origin': { parentOrigin: string }
+  'preview-max-grants': {}
+  'preview-disposed': {}
+  'preview-outside-workspace': { path: string }
+  'preview-not-found': { path: string }
+  'preview-not-file': { path: string }
+  'preview-unsupported-format': { path: string }
+  'preview-unsupported-media': { path: string }
+  'preview-too-large': { path: string; limit: number; size?: number }
+  'preview-invalid-text': { path: string }
+  'preview-unavailable': {}
   'internal': {}
 }
 

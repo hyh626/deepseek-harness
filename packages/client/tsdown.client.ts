@@ -260,6 +260,9 @@ function clientConfig(id: string, entry: string): UserConfig {
       },
     }],
     outputOptions: {
+      // The runtime fetches one closure-factory artifact and has no URL module
+      // graph for split chunks. Inline dependency dynamic imports into client.js.
+      codeSplitting: false,
       entryFileNames: 'client.js',
       // The map is served from /plugins/<scoped-package>/client.js.map. The
       // browser resolves its local sources back into URLs that mirror the

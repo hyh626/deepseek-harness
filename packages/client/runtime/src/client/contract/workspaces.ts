@@ -6,7 +6,9 @@
  * the concrete class. Widening this interface is the explicit act of
  * widening what features may do to the workspaces domain.
  */
-import type { DirectoryListing, SessionId, WorkspaceId, WorkspaceView } from '@deepseek-ai/dsh-api-remotes/client'
+import type { DirectoryListing, InteractivePreviewId, SessionId, WorkspaceId, WorkspaceView } from '@deepseek-ai/dsh-api-remotes/client'
+import type { ImageMediaType } from '@deepseek-ai/dsh-attachment'
+import type { InteractivePreviewGrant } from '../workspaces/service.ts'
 import type { WorkspaceListState } from '../workspaces/service.ts'
 import type { ObservableSnapshot } from './store.ts'
 
@@ -58,6 +60,52 @@ export interface IWorkspaces {
    * @param path - absolute or host-resolvable path.
    */
   openPath(path: string): Promise<void>
+  /**
+   * Read one Markdown or HTML document confined to a session workspace.
+   * @param sessionId - addressed session.
+   * @param path - document path relative to or within the session cwd.
+   * @param signal - aborts the wire request when the caller supersedes it.
+   * @returns canonical path, format, and UTF-8 content.
+   */
+  readPreviewDocument(
+    sessionId: SessionId,
+    path: string,
+    signal?: AbortSignal,
+  ): Promise<{ path: string; format: 'markdown' | 'html'; content: string }>
+  /**
+   * Read one raster image relative to a preview document directory.
+   * @param sessionId - addressed session.
+   * @param documentPath - preview document path used as the relative base.
+   * @param source - image source relative to the document directory unless absolute.
+   * @param signal - aborts the wire request when the caller supersedes it.
+   * @returns declared media type and base64 payload.
+   */
+  readPreviewImage(
+    sessionId: SessionId,
+    documentPath: string,
+    source: string,
+    signal?: AbortSignal,
+  ): Promise<{ mediaType: ImageMediaType; data: string }>
+  /**
+   * Mint one ephemeral interactive preview origin for a session HTML entry.
+   * @param sessionId - addressed session.
+   * @param path - entry HTML path relative to or within the session cwd.
+   * @param parentOrigin - trusted parent origin embedded in CSP `frame-ancestors`.
+   * @param signal - aborts the wire request when the caller supersedes it.
+   * @returns the grant id and complete HTTP origin.
+   */
+  startInteractivePreview(
+    sessionId: SessionId,
+    path: string,
+    parentOrigin: string,
+    signal?: AbortSignal,
+  ): Promise<InteractivePreviewGrant>
+  /**
+   * Close one interactive preview grant idempotently.
+   * @param id - grant to close.
+   * @param signal - aborts the wire request when the caller supersedes it.
+   */
+  stopInteractivePreview(id: InteractivePreviewId, signal?: AbortSignal): Promise<void>
   /**
    * Rename a Workspace.
    * @param workspaceId - target workspace.

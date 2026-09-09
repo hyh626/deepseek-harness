@@ -18,6 +18,8 @@ import {
   hostCreateDirectoryRequestSchema, hostCreateDirectoryValueSchema,
   hostDescribeRequestSchema, hostDescribeValueSchema,
   hostListDirectoryRequestSchema, hostListDirectoryValueSchema,
+  hostStartInteractivePreviewRequestSchema,
+  hostStopInteractivePreviewRequestSchema,
 } from '../src/api/host.schema.ts'
 import {
   workspaceArchiveSessionRequestSchema, workspaceArchiveSessionValueSchema,
@@ -79,6 +81,10 @@ describe('rpcErrorSchema', () => {
     expect(rpcErrorSchema.parse({ code: 'title-invalid', message: 'm', details: { sessionId: 's' } }).code).toBe('title-invalid')
     // The credentials producer still emits this code, so the branch has to stay.
     expect(rpcErrorSchema.parse({ code: 'credential-rejected', message: 'm', details: { ref: 'r' } }).code).toBe('credential-rejected')
+    expect(rpcErrorSchema.parse({ code: 'preview-unavailable', message: 'm', details: {} }).code).toBe('preview-unavailable')
+    expect(rpcErrorSchema.parse({ code: 'preview-session-not-found', message: 'm', details: { sessionId: 's' } }).code).toBe('preview-session-not-found')
+    expect(rpcErrorSchema.parse({ code: 'preview-entry-not-html', message: 'm', details: { path: '/x' } }).code).toBe('preview-entry-not-html')
+    expect(rpcErrorSchema.parse({ code: 'preview-invalid-parent-origin', message: 'm', details: { parentOrigin: 'x' } }).code).toBe('preview-invalid-parent-origin')
     expect(rpcErrorSchema.parse({ code: 'internal', message: 'm', details: {} }).code).toBe('internal')
   })
 
@@ -341,6 +347,25 @@ describe('host domain schemas', () => {
       expect(() => hostCreateDirectoryRequestSchema.parse({ path: '/x', name })).toThrow()
     }
     expect(hostCreateDirectoryValueSchema.parse({ path: '/x/new' })).toEqual({ path: '/x/new' })
+  })
+
+  it('validates interactive preview start/stop payloads', () => {
+    expect(hostStartInteractivePreviewRequestSchema.parse({
+      sessionId: 's1',
+      path: 'app/index.html',
+      parentOrigin: 'http://127.0.0.1:3000',
+    })).toEqual({
+      sessionId: 's1',
+      path: 'app/index.html',
+      parentOrigin: 'http://127.0.0.1:3000',
+    })
+    expect(hostStopInteractivePreviewRequestSchema.parse({ id: 'grant-1' })).toEqual({ id: 'grant-1' })
+    expect(() => hostStartInteractivePreviewRequestSchema.parse({
+      sessionId: 's1',
+      path: '',
+      parentOrigin: 'http://127.0.0.1:3000',
+    })).toThrow()
+    expect(() => hostStopInteractivePreviewRequestSchema.parse({ id: '' })).toThrow()
   })
 })
 

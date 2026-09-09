@@ -42,6 +42,15 @@ import type {
   WorkspaceId, WorkspaceView,
 } from './api/index.ts'
 import {
+  DEFAULT_PREVIEW_DOCUMENT_MAX_BYTES,
+  DEFAULT_PREVIEW_IMAGE_MAX_BYTES,
+  readPreviewDocument as readConfinedPreviewDocument,
+  readPreviewImage as readConfinedPreviewImage,
+  previewReadRpcError,
+  type PreviewReadLimits,
+} from './preview-read.ts'
+import { interactivePreviewRpcError } from './interactive-preview-rpc.ts'
+import {
   DEFAULT_SESSION_LOG_COMPRESSION_LEVEL,
   flushLiveSessionLog,
   sessionLogExportDeps,
@@ -56,6 +65,9 @@ import {
   SESSION_SEARCH_SNIPPET_MAX_CODE_POINTS,
   truncateUnicodeCodePoints,
 } from './api/session-search.ts'
+// Type-only: resolves `ctx.get('interactivePreview')` to the grant provider.
+import type {} from '@deepseek-ai/dsh-host-interactive-preview'
+import { InteractivePreviewId } from '@deepseek-ai/dsh-host-interactive-preview'
 // Type-only: resolves `ctx.get('sessionProjections')` to the projection registry.
 import type {} from '@deepseek-ai/dsh-session-projection'
 // Type-only: resolves `ctx.get('tasks')` to the background job registry.
@@ -628,6 +640,10 @@ export interface ApiProxyDefaults {
   sessionExportCompressionLevel?: SessionLogCompressionLevel
   /** Maximum artifact size eligible for one cold blankness read. */
   coldBlankProbeMaxBytes?: number
+  /** Maximum UTF-8 byte size of one preview document read. */
+  previewDocumentMaxBytes?: number
+  /** Maximum byte size of one preview image read. */
+  previewImageMaxBytes?: number
   /**
    * Whether handing a path to the native opener can work at all — the
    * `hasDocument` capability the preset roster reports, and the switch
@@ -1077,6 +1093,10 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
     ?? DEFAULT_SESSION_LOG_COMPRESSION_LEVEL
   const coldBlankProbeMaxBytes = defaults.coldBlankProbeMaxBytes
     ?? DEFAULT_COLD_BLANK_PROBE_MAX_BYTES
+  const previewLimits: PreviewReadLimits = {
+    previewDocumentMaxBytes: defaults.previewDocumentMaxBytes ?? DEFAULT_PREVIEW_DOCUMENT_MAX_BYTES,
+    previewImageMaxBytes: defaults.previewImageMaxBytes ?? DEFAULT_PREVIEW_IMAGE_MAX_BYTES,
+  }
   /** The seed model each create/resume declares; re-read so it never goes stale. */
   const agentOptions = (): AgentOptions => {
     const { provider, model } = defaults.defaultModelSelection()
@@ -2947,6 +2967,146 @@ export function createApiProxy(ctx: Context, defaults: ApiProxyDefaults): ApiPro
 
       async openPath(request, signal) {
         return openPath(request, request.payload.path, signal)
+      },
+
+      async readPreviewDocument(request, signal) {
+        const { sessionId, path } = request.payload
+        const session = ctx.sessions.get(sessionId)
+        if (session === undefined) {
+          return err(request, {
+            code: 'session-not-found',
+            message: `session "${sessionId}" not found (not attached)`,
+            details: { sessionId },
+          })
+        }
+        if (session.header.cwd === undefined) {
+          return err(request, {
+            code: 'internal',
+            message: `session "${sessionId}" has no project cwd`,
+            details: {},
+          })
+        }
+        const fs = ctx.get('fs')
+        if (fs === undefined) {
+          return err(request, {
+            code: 'preview-unavailable',
+            message: 'preview reads need a filesystem provider; this deployment mounts no @deepseek-ai/dsh-fs backend',
+            details: {},
+          })
+        }
+        if (isAborted(signal)) {
+          return err(request, { code: 'cancelled', message: 'preview document read was aborted', details: {} })
+        }
+        try {
+          return ok(request, await readConfinedPreviewDocument(
+            fs,
+            session.header.cwd,
+            path,
+            previewLimits,
+            signal,
+          ))
+        } catch (error: unknown) {
+          if (isAborted(signal)) {
+            return err(request, { code: 'cancelled', message: 'preview document read was aborted', details: {} })
+          }
+          return err(request, previewReadRpcError(error))
+        }
+      },
+
+      async readPreviewImage(request, signal) {
+        const { sessionId, documentPath, source } = request.payload
+        const session = ctx.sessions.get(sessionId)
+        if (session === undefined) {
+          return err(request, {
+            code: 'session-not-found',
+            message: `session "${sessionId}" not found (not attached)`,
+            details: { sessionId },
+          })
+        }
+        if (session.header.cwd === undefined) {
+          return err(request, {
+            code: 'internal',
+            message: `session "${sessionId}" has no project cwd`,
+            details: {},
+          })
+        }
+        const fs = ctx.get('fs')
+        if (fs === undefined) {
+          return err(request, {
+            code: 'preview-unavailable',
+            message: 'preview reads need a filesystem provider; this deployment mounts no @deepseek-ai/dsh-fs backend',
+            details: {},
+          })
+        }
+        if (isAborted(signal)) {
+          return err(request, { code: 'cancelled', message: 'preview image read was aborted', details: {} })
+        }
+        try {
+          return ok(request, await readConfinedPreviewImage(
+            fs,
+            session.header.cwd,
+            documentPath,
+            source,
+            previewLimits,
+            signal,
+          ))
+        } catch (error: unknown) {
+          if (isAborted(signal)) {
+            return err(request, { code: 'cancelled', message: 'preview image read was aborted', details: {} })
+          }
+          return err(request, previewReadRpcError(error))
+        }
+      },
+
+      async startInteractivePreview(request, signal) {
+        const preview = ctx.get('interactivePreview')
+        if (preview === undefined) {
+          return err(request, {
+            code: 'preview-unavailable',
+            message: 'interactive preview grants need @deepseek-ai/dsh-host-interactive-preview; this deployment mounts no provider',
+            details: {},
+          })
+        }
+        const { sessionId, path, parentOrigin } = request.payload
+        if (isAborted(signal)) {
+          return err(request, { code: 'cancelled', message: 'interactive preview start was aborted', details: {} })
+        }
+        try {
+          const grant = await preview.open({ sessionId, path, parentOrigin })
+          if (isAborted(signal)) {
+            await preview.close(grant.id)
+            return err(request, { code: 'cancelled', message: 'interactive preview start was aborted', details: {} })
+          }
+          return ok(request, { id: grant.id, origin: grant.origin })
+        } catch (error: unknown) {
+          if (isAborted(signal)) {
+            return err(request, { code: 'cancelled', message: 'interactive preview start was aborted', details: {} })
+          }
+          return err(request, interactivePreviewRpcError(error, { sessionId, path, parentOrigin }))
+        }
+      },
+
+      async stopInteractivePreview(request, signal) {
+        const preview = ctx.get('interactivePreview')
+        if (preview === undefined) {
+          return err(request, {
+            code: 'preview-unavailable',
+            message: 'interactive preview grants need @deepseek-ai/dsh-host-interactive-preview; this deployment mounts no provider',
+            details: {},
+          })
+        }
+        if (isAborted(signal)) {
+          return err(request, { code: 'cancelled', message: 'interactive preview stop was aborted', details: {} })
+        }
+        try {
+          await preview.close(InteractivePreviewId(request.payload.id))
+          return ok(request, { stopped: true as const })
+        } catch (error: unknown) {
+          if (isAborted(signal)) {
+            return err(request, { code: 'cancelled', message: 'interactive preview stop was aborted', details: {} })
+          }
+          return err(request, interactivePreviewRpcError(error))
+        }
       },
     },
 

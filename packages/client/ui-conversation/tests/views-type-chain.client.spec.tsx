@@ -5,7 +5,7 @@ import { Context } from '@deepseek-ai/cordis'
 import { describe, expect, it } from 'vitest'
 import type { ReactNode } from 'react'
 import { SlotRegistry } from '@deepseek-ai/dsh-client-runtime/client'
-import type { ChatViewSlotProps, ConvViewProps } from '../src/client/contract/slots.ts'
+import type { ChatViewSlotProps, ConvViewProps, DetailsSlotProps } from '../src/client/contract/slots.ts'
 
 describe('view-ring type negatives (compile-time; body never runs)', () => {
   it('holds the negative samples as expect-error sites', () => {
@@ -49,6 +49,9 @@ describe('view-ring type negatives (compile-time; body never runs)', () => {
         return null
       }
       void chatProps
+      // 7. Tool details is a list entry in the exclusive secondary-panel host.
+      // @ts-expect-error secondary-panel entries require their exclusive id
+      slots.register({ name: 'secondaryPanel' }, (_p: DetailsSlotProps) => null)
       return null as ReactNode
     }
     expect(negatives).toBeTypeOf('function')

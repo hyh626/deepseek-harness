@@ -7,9 +7,10 @@ import {
 // Type-only: the ctx.settingsScope Context merge. Cross-plugin collaboration
 // goes through the service, never a value import (client bundle purity gate).
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
-import type {} from '@deepseek-ai/dsh-client-ui-layout/client'
+import type { LayoutPanelId } from '@deepseek-ai/dsh-client-ui-layout/client'
 // Type-only: pulls the locale plugin's Context merge (ctx.locale).
 import type {} from '@deepseek-ai/dsh-client-locale/client'
+import './contract/file-open.ts'
 import type { ViewTab } from './contract/views.ts'
 import type {
   ApprovalWait, ChatNodeTurnDataInjected, ChatScrollPosition, ChatViewInjected, ComposerBarInjected,
@@ -39,6 +40,8 @@ import { en, NS, zh, type ConversationKey } from './locales.ts'
 import { registerConversationNodes } from './conversation-nodes/register.ts'
 import { registerChatNodeRenderers } from './chat/register-node-renderers.ts'
 import { CONVERSATION_SETTINGS_NAMESPACE, type ConversationSettings } from '../submission-settings.ts'
+
+const TOOL_DETAILS_PANEL_ID = 'tool-details' as LayoutPanelId
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface LocaleNamespaceMap {
@@ -389,14 +392,17 @@ export function apply(ctx: Context): void {
       return {
         openDetails: (target) => {
           actions.select(target)
-          layout.openDetails()
+          layout.openPanel(TOOL_DETAILS_PANEL_ID)
         },
         fileMentions: owner => ctx.get('chatFileMentions')?.forClosing(owner),
         openFile: (path) => {
           const cwd = sessions.list.getSnapshot().byId[sessionId]?.cwd
-          void workspaces.openPath(resolveWorkspacePath(cwd, path)).catch(() => {
-            // Host/OS open failures stay silent in the chat row; the native
-            // app surfaces its own error dialog when the path is unusable.
+          const resolved = resolveWorkspacePath(cwd, path)
+          ctx.waterfall('conversation/open-file', { sessionId, path: resolved }, () => {
+            void workspaces.openPath(resolved).catch(() => {
+              // Host/OS open failures stay silent in the chat row; the native
+              // app surfaces its own error dialog when the path is unusable.
+            })
           })
         },
         loadOlder: () => { void scoped.loadOlder() },
@@ -442,14 +448,15 @@ export function apply(ctx: Context): void {
   ctx.plugin(queueDockEntry)
 
   slots.register({
-    name: 'details',
+    name: 'secondaryPanel',
+    id: TOOL_DETAILS_PANEL_ID,
     locale: NS,
     children: {
       'conversation.details.tool': { kind: 'single', scope: 'session' },
     },
     store: chatStore,
     inject: (): DetailsInjected => ({
-      closeDetails: () => { layout.closeDetails() },
+      closeDetails: () => { layout.closePanel(TOOL_DETAILS_PANEL_ID) },
     }),
   }, DetailsPanel)
 

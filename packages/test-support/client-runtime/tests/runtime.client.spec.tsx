@@ -407,7 +407,7 @@ describe('workspaces', () => {
 describe('feature mount and disposal', () => {
   it('mounts a plugin on a real fiber; dispose() cascades entries, declared children, and services', async () => {
     const runtime = await runtimeWithFrame()
-    runtime.provide('layout', { openDetails: vi.fn() })
+    runtime.provide('layout', { openPanel: vi.fn() })
     const feature = await runtime.mount({
       inject: ['slots', 'layout'],
       apply: (ctx: typeof runtime.ctx) => {

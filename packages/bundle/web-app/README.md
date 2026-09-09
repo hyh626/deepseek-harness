@@ -24,3 +24,4 @@ The prompt section sits near the system prompt's head and is stable for the life
 
 - **The frontend dist must be built** — `require.resolve` of the dist fails loud at activation with a build hint; there is no source-serving fallback.
 - **`lanAddresses` is a boot-time snapshot** — interface changes after boot are not re-advertised; the printed LAN URL always matches the configured trust fence.
+- **Interactive preview grants are loopback unique hostnames** — the shipped `interactive-preview` row binds `127.0.0.1` with `hostnameSuffix: localhost`. A reverse proxy that rewrites `Host`, or a remote browser without a wildcard-DNS overlay, cannot load those origins.

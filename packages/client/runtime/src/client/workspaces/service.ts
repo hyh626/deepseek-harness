@@ -2,9 +2,10 @@
 
 import type { Context } from '@deepseek-ai/cordis'
 import type {
-  DirectoryListing, IApiClient, RpcError,
+  DirectoryListing, IApiClient, InteractivePreviewId, RpcError,
   SessionId, WorkspaceId, WorkspaceView,
 } from '@deepseek-ai/dsh-api-remotes/client'
+import type { ImageMediaType } from '@deepseek-ai/dsh-attachment'
 import type { SnapshotStore } from '../contract/store.ts'
 import { createSnapshotStore } from '../contract/store.ts'
 import type { SessionsPort, SessionsPortList } from '../contract/sessions-port.ts'
@@ -45,6 +46,30 @@ export class DirectoryBrowseError extends Error {
     super(`directory browse failed: ${rpcError.code}: ${rpcError.message}`)
     this.name = 'DirectoryBrowseError'
   }
+}
+
+/** Structured preview-read failure so the document preview can branch on Host business codes. */
+export class PreviewReadError extends Error {
+  constructor(readonly rpcError: RpcError) {
+    super(`preview read failed: ${rpcError.code}: ${rpcError.message}`)
+    this.name = 'PreviewReadError'
+  }
+}
+
+/** Structured interactive-preview failure for grant start/stop flows. */
+export class InteractivePreviewError extends Error {
+  constructor(readonly rpcError: RpcError) {
+    super(`interactive preview failed: ${rpcError.code}: ${rpcError.message}`)
+    this.name = 'InteractivePreviewError'
+  }
+}
+
+/** One minted interactive preview grant returned from {@link WorkspaceRuntime.startInteractivePreview}. */
+export interface InteractivePreviewGrant {
+  /** Stable grant id for explicit close. */
+  id: InteractivePreviewId
+  /** Complete HTTP origin (`http://<capability>.<suffix>:<port>`). */
+  origin: string
 }
 
 /** Real Workspace object layer and Host actions. */
@@ -247,6 +272,71 @@ export class WorkspaceRuntime implements IWorkspaces {
     if (!response.result.ok) {
       throw new Error(`path open failed: ${response.result.error.message}`)
     }
+  }
+
+  /**
+   * Read one Markdown or HTML document confined to a session workspace.
+   * @param sessionId - addressed session.
+   * @param path - document path relative to or within the session cwd.
+   * @param signal - aborts the wire request when the caller supersedes it.
+   * @returns canonical path, format, and UTF-8 content.
+   */
+  async readPreviewDocument(
+    sessionId: SessionId,
+    path: string,
+    signal?: AbortSignal,
+  ): Promise<{ path: string; format: 'markdown' | 'html'; content: string }> {
+    const response = await this.api.host.readPreviewDocument({ sessionId, path }, signal)
+    if (!response.result.ok) throw new PreviewReadError(response.result.error)
+    return response.result.value
+  }
+
+  /**
+   * Read one raster image relative to a preview document directory.
+   * @param sessionId - addressed session.
+   * @param documentPath - preview document path used as the relative base.
+   * @param source - image source relative to the document directory unless absolute.
+   * @param signal - aborts the wire request when the caller supersedes it.
+   * @returns declared media type and base64 payload.
+   */
+  async readPreviewImage(
+    sessionId: SessionId,
+    documentPath: string,
+    source: string,
+    signal?: AbortSignal,
+  ): Promise<{ mediaType: ImageMediaType; data: string }> {
+    const response = await this.api.host.readPreviewImage({ sessionId, documentPath, source }, signal)
+    if (!response.result.ok) throw new PreviewReadError(response.result.error)
+    return response.result.value
+  }
+
+  /**
+   * Mint one ephemeral interactive preview origin for a session HTML entry.
+   * @param sessionId - addressed session.
+   * @param path - entry HTML path relative to or within the session cwd.
+   * @param parentOrigin - trusted parent origin embedded in CSP `frame-ancestors`.
+   * @param signal - aborts the wire request when the caller supersedes it.
+   * @returns the grant id and complete HTTP origin.
+   */
+  async startInteractivePreview(
+    sessionId: SessionId,
+    path: string,
+    parentOrigin: string,
+    signal?: AbortSignal,
+  ): Promise<InteractivePreviewGrant> {
+    const response = await this.api.host.startInteractivePreview({ sessionId, path, parentOrigin }, signal)
+    if (!response.result.ok) throw new InteractivePreviewError(response.result.error)
+    return response.result.value
+  }
+
+  /**
+   * Close one interactive preview grant idempotently.
+   * @param id - grant to close.
+   * @param signal - aborts the wire request when the caller supersedes it.
+   */
+  async stopInteractivePreview(id: InteractivePreviewId, signal?: AbortSignal): Promise<void> {
+    const response = await this.api.host.stopInteractivePreview({ id }, signal)
+    if (!response.result.ok) throw new InteractivePreviewError(response.result.error)
   }
 
   /**

@@ -8,7 +8,7 @@
  */
 
 import { globSync, readFileSync, writeFileSync } from 'node:fs'
-import { dirname, resolve, sep } from 'node:path'
+import { dirname, relative, resolve, sep } from 'node:path'
 import ts from 'typescript'
 import { LINK_MAP } from './gen-cordis-catalog.ts'
 import { parseJsDoc, pointer, rawJsDoc } from './jsdoc.ts'
@@ -518,7 +518,7 @@ function findSchemaExpr(ctx: FileCtx, pluginClass: ts.ClassDeclaration | null): 
 }
 
 /** Read an `inject` service-key list: `export const inject = […]` in the entry
- * file, else `static inject = […]` on the plugin class. */
+ * file or the plugin class's file, else `static inject = […]` on the plugin class. */
 function findInject(ctx: FileCtx, pluginClass: ts.ClassDeclaration | null, violations: string[]): string[] {
   const fromArray = (expr: ts.Expression, where: string): string[] => {
     if (!ts.isArrayLiteralExpression(expr)) {
@@ -527,13 +527,26 @@ function findInject(ctx: FileCtx, pluginClass: ts.ClassDeclaration | null, viola
     }
     return expr.elements.map(el => ts.isStringLiteral(el) ? el.text : el.getText(ctx.sf))
   }
-  for (const stmt of ctx.sf.statements) {
-    if (!ts.isVariableStatement(stmt)) continue
-    for (const decl of stmt.declarationList.declarations) {
-      if (ts.isIdentifier(decl.name) && decl.name.text === 'inject' && decl.initializer) {
-        return fromArray(decl.initializer, ctx.rel)
+  const fromFile = (sf: ts.SourceFile, where: string): string[] => {
+    for (const stmt of sf.statements) {
+      if (!ts.isVariableStatement(stmt)) continue
+      for (const decl of stmt.declarationList.declarations) {
+        if (ts.isIdentifier(decl.name) && decl.name.text === 'inject' && decl.initializer) {
+          let expr: ts.Expression = decl.initializer
+          while (ts.isAsExpression(expr) || ts.isSatisfiesExpression(expr) || ts.isParenthesizedExpression(expr)) {
+            expr = expr.expression
+          }
+          return fromArray(expr, where)
+        }
       }
     }
+    return []
+  }
+  const fromEntry = fromFile(ctx.sf, ctx.rel)
+  if (fromEntry.length > 0) return fromEntry
+  if (pluginClass !== null) {
+    const fromClassFile = fromFile(pluginClass.getSourceFile(), pluginClass.getSourceFile().fileName)
+    if (fromClassFile.length > 0) return fromClassFile
   }
   for (const member of pluginClass?.members ?? []) {
     if (ts.isPropertyDeclaration(member) && member.name.getText() === 'inject' && member.initializer) {
@@ -545,7 +558,13 @@ function findInject(ctx: FileCtx, pluginClass: ts.ClassDeclaration | null, viola
 
 /** Resolve the entry file's default export to its class/function declaration
  * (mirroring the Loader's `unwrapExports`), or null when there is none. */
-function defaultExport(ctx: FileCtx): ts.ClassDeclaration | ts.FunctionDeclaration | null {
+function defaultExport(
+  ctx: FileCtx,
+  cache: Map<string, FileCtx>,
+  seen = new Set<string>(),
+): ts.ClassDeclaration | ts.FunctionDeclaration | null {
+  if (seen.has(ctx.abs)) return null
+  seen.add(ctx.abs)
   for (const stmt of ctx.sf.statements) {
     if (ts.isExportAssignment(stmt) && !stmt.isExportEquals && ts.isIdentifier(stmt.expression)) {
       const name = stmt.expression.text
@@ -556,6 +575,21 @@ function defaultExport(ctx: FileCtx): ts.ClassDeclaration | ts.FunctionDeclarati
     }
     if ((ts.isClassDeclaration(stmt) || ts.isFunctionDeclaration(stmt))
       && stmt.modifiers?.some(m => m.kind === ts.SyntaxKind.DefaultKeyword)) return stmt
+    if (
+      ts.isExportDeclaration(stmt)
+      && stmt.moduleSpecifier
+      && ts.isStringLiteral(stmt.moduleSpecifier)
+      && stmt.exportClause
+      && ts.isNamedExports(stmt.exportClause)
+    ) {
+      const el = stmt.exportClause.elements.find(e => e.name.text === 'default')
+      if (el === undefined) continue
+      const spec = stmt.moduleSpecifier.text
+      if (!spec.startsWith('.') || !spec.endsWith('.ts')) continue
+      const abs = resolve(dirname(ctx.abs), spec)
+      const rel = ctx.rel.slice(0, ctx.rel.lastIndexOf('/') + 1) + spec.replace(/^\.\//, '')
+      return defaultExport(loadFile(abs, rel, cache), cache, seen)
+    }
   }
   return null
 }
@@ -616,7 +650,7 @@ export function collectConfigCatalog(scanRoot: string = root): CatalogEntry[] {
     // Classify, mirroring the Loader's unwrapExports: the default export IS
     // the plugin when present; else an exported `apply` makes the module
     // namespace the plugin; else the package is a plain library.
-    const dflt = defaultExport(ctx)
+    const dflt = defaultExport(ctx, cache)
     const apply = applyExport(ctx)
     let pluginClass: ts.ClassDeclaration | null = null
     let configParam: ts.ParameterDeclaration | undefined
@@ -653,6 +687,14 @@ export function collectConfigCatalog(scanRoot: string = root): CatalogEntry[] {
     entries.push(entry)
     if (kind !== 'config' || !configParam) continue
 
+    const typeCtx = pluginClass !== null
+      ? loadFile(
+        pluginClass.getSourceFile().fileName,
+        relative(scanRoot, pluginClass.getSourceFile().fileName).split(sep).join('/'),
+        cache,
+      )
+      : ctx
+
     // Resolve the config type and paste its package-local transitive closure.
     if (!configParam.type || !ts.isTypeReferenceNode(configParam.type) || !ts.isIdentifier(configParam.type.typeName)) {
       violations.push(`${pkg}: config parameter type (${pointer(entryRel, ctx.sf, configParam)}) is not a plain type-name reference; declare a named config type.`)
@@ -667,7 +709,7 @@ export function collectConfigCatalog(scanRoot: string = root): CatalogEntry[] {
     // cannot both render unambiguously, so every resolution is identity-checked
     // by source pointer and a collision is a violation, never a silent skip.
     const pastedDeclByName = new Map<string, string>()
-    const queue: { name: string; from: FileCtx }[] = [{ name: typeName, from: ctx }]
+    const queue: { name: string; from: FileCtx }[] = [{ name: typeName, from: typeCtx }]
     for (let item = queue.shift(); item !== undefined; item = queue.shift()) {
       const { name, from } = item
       const resolved = resolveTypeName(from, name, cache, violations)
@@ -717,9 +759,9 @@ export function collectConfigCatalog(scanRoot: string = root): CatalogEntry[] {
     entry.refs = [...refs.values()].sort((a, b) => a.alias.localeCompare(b.alias))
 
     // Statically walk the runtime schema (when one exists) for the subset check.
-    const schemaExpr = findSchemaExpr(ctx, pluginClass)
+    const schemaExpr = findSchemaExpr(typeCtx, pluginClass)
     if (schemaExpr) {
-      const { keys, composes } = walkSchemaExpr(ctx, unwrapExpr(schemaExpr), `${pkg} (${entryRel})`, violations)
+      const { keys, composes } = walkSchemaExpr(typeCtx, unwrapExpr(schemaExpr), `${pkg} (${typeCtx.rel})`, violations)
       entry.schemaKeys = keys
       entry.schemaComposes = composes
     } else {

@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest'
 import type { SessionId, WorkspaceId, WorkspaceView } from '@deepseek-ai/dsh-api-remotes/client'
 import { SessionRuntime } from '../src/client/sessions/service.ts'
 import { WorkspaceManager } from '../src/client/workspaces/manager.ts'
-import { DirectoryBrowseError, WorkspaceCreateError, WorkspaceRuntime } from '../src/client/workspaces/service.ts'
+import { DirectoryBrowseError, InteractivePreviewError, PreviewReadError, WorkspaceCreateError, WorkspaceRuntime } from '../src/client/workspaces/service.ts'
 import { FakeApiClient, deferred, err, fakeRemote, ok } from './fake-api.client.ts'
 
 const sid = (id: string): SessionId => id as SessionId
@@ -358,6 +358,58 @@ describe('WorkspaceRuntime', () => {
     expect(api.callsOf('host.openPath')).toEqual([{ path: '/w/alpha/a.ts' }])
     api.onOpenPath = () => Promise.resolve(err({ code: 'internal', message: 'boom', details: {} }))
     await expect(workspaces.openPath('/missing')).rejects.toThrow(/path open failed/)
+  })
+
+  it('reads preview documents and images through the host, wrapping business failures', async () => {
+    const ctx = new Context()
+    const api = new FakeApiClient()
+    const sessions = new SessionRuntime(ctx, api, fakeRemote())
+    const workspaces = new WorkspaceRuntime(ctx, api, sessions)
+    const sessionId = sid('preview-session')
+    const document = { path: '/w/doc.md', format: 'markdown' as const, content: '# Doc' }
+    api.onReadPreviewDocument = () => Promise.resolve(ok(document))
+    await expect(workspaces.readPreviewDocument(sessionId, 'doc.md')).resolves.toEqual(document)
+    expect(api.callsOf('host.readPreviewDocument')).toEqual([{ sessionId, path: 'doc.md' }])
+
+    const image = { mediaType: 'image/png' as const, data: 'AA==' }
+    api.onReadPreviewImage = () => Promise.resolve(ok(image))
+    await expect(workspaces.readPreviewImage(sessionId, 'doc.md', 'shot.png')).resolves.toEqual(image)
+    expect(api.callsOf('host.readPreviewImage')).toEqual([{ sessionId, documentPath: 'doc.md', source: 'shot.png' }])
+
+    api.onReadPreviewDocument = () => Promise.resolve(err({
+      code: 'preview-outside-workspace', message: 'outside', details: { path: '../x.md' },
+    }))
+    const documentFailure = workspaces.readPreviewDocument(sessionId, '../x.md')
+    await expect(documentFailure).rejects.toBeInstanceOf(PreviewReadError)
+    await expect(documentFailure).rejects.toMatchObject({ rpcError: { code: 'preview-outside-workspace' } })
+  })
+
+  it('starts and stops interactive preview grants through the host', async () => {
+    const ctx = new Context()
+    const api = new FakeApiClient()
+    const sessions = new SessionRuntime(ctx, api, fakeRemote())
+    const workspaces = new WorkspaceRuntime(ctx, api, sessions)
+    const sessionId = sid('preview-session')
+    const grant = { id: 'grant-1' as never, origin: 'http://abc.localhost:1' }
+    api.onStartInteractivePreview = () => Promise.resolve(ok(grant))
+    await expect(workspaces.startInteractivePreview(sessionId, 'app/index.html', 'http://127.0.0.1:3000'))
+      .resolves.toEqual(grant)
+    expect(api.callsOf('host.startInteractivePreview')).toEqual([{
+      sessionId,
+      path: 'app/index.html',
+      parentOrigin: 'http://127.0.0.1:3000',
+    }])
+
+    api.onStopInteractivePreview = () => Promise.resolve(ok({ stopped: true as const }))
+    await expect(workspaces.stopInteractivePreview(grant.id)).resolves.toBeUndefined()
+    expect(api.callsOf('host.stopInteractivePreview')).toEqual([{ id: grant.id }])
+
+    api.onStartInteractivePreview = () => Promise.resolve(err({
+      code: 'preview-entry-not-html', message: 'not html', details: { path: 'notes.md' },
+    }))
+    const startFailure = workspaces.startInteractivePreview(sessionId, 'notes.md', 'http://127.0.0.1:3000')
+    await expect(startFailure).rejects.toBeInstanceOf(InteractivePreviewError)
+    await expect(startFailure).rejects.toMatchObject({ rpcError: { code: 'preview-entry-not-html' } })
   })
 
   it('deletes a Workspace or preserves it when the Host rejects deletion', async () => {

@@ -22,6 +22,7 @@ export type { DraftAttachmentId } from './input/contract.ts'
 export type {
   CallId, ChatStoreState, SelectionTarget, ViewTab,
 } from './contract/views.ts'
+export type { ConversationOpenFileRequest } from './contract/file-open.ts'
 export type { ConversationKey } from './locales.ts'
 export type {
   AssistantChatData, ChatNode, ChatNodeDataMap, ChatNodeKind, ManualCompactionChatData,

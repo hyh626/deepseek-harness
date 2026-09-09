@@ -2,7 +2,7 @@
 
 English | [中文](web-server.zh.md)
 
-[dsh-host-webserver](../../packages/host/webserver) is the browser HTTP carrier for the GUI host: a single `node:http` plugin providing `ctx.webServer`, a named-route registry, index.html transform callbacks, and one fallback handler that a plugin may claim. It is not part of the agent loop and not a capability seam; it knows no harness concepts, and another plugin registers every feature route, including the `/api` bridge, plugin bundles, and the HMR event stream ([layering note](../../.agents/notes/implemented/architecture/2026-07-19-gui-layering-and-rpc-protocol.md)). It serves browsers only: Electron loads the built files over `file://` and sends fetch requests through an IPC bridge instead of this server.
+[dsh-host-webserver](../../packages/host/webserver) is the browser HTTP carrier for the GUI host: a single `node:http` plugin providing `ctx.webServer`, a named-route registry, index.html transform callbacks, and one fallback handler that a plugin may claim. It is not part of the agent loop and not a capability seam; it knows no harness concepts, and another plugin registers every feature route, including the `/api` bridge, plugin bundles, and the HMR event stream ([layering note](../../.agents/notes/implemented/architecture/2026-07-19-gui-layering-and-rpc-protocol.md)). It serves browsers only: Electron loads the built files over `file://` and sends fetch requests through an IPC bridge instead of this server. Unique-origin interactive HTML preview (`ctx.interactivePreview`) is a separate per-grant HTTP listener; [the package README](../../packages/host/interactive-preview/README.md) owns grant semantics.
 
 Source: [`packages/host/webserver/src/index.ts`](../../packages/host/webserver/src/index.ts)
 
@@ -53,6 +53,29 @@ A request whose handling throws (a malformed %-escape hitting `decodeURIComponen
 ## Cordis API
 
 Generated from source by `scripts/gen-cordis-catalog.ts` (verified fresh by `pnpm run verify-cordis-catalog` in doc-sync; regenerate with `pnpm run gen-cordis-catalog`) — this section is byte-identical in both language sides of the page. Signature blocks use a `ts cordis-catalog` fence and keep the original source JSDoc; dispatch modes are defined in the [primer](../cordis-primer.md#dispatch-modes), and the framework-inherited `ctx` API lives in [cordis-api/inherited.md](../cordis-api/inherited.md).
+
+<a id="ctxinteractivepreview--interactivepreview"></a>
+
+### `ctx.interactivePreview` — `InteractivePreview`
+
+Mint ephemeral capability-hostname preview origins backed by session workspace files.
+
+```ts cordis-catalog
+/**
+ * Open one preview grant for a session HTML entry.
+ * @param options - session id, entry path, and trusted parent origin.
+ * @returns the grant id and complete HTTP origin.
+ */
+async open(options: OpenInteractivePreviewOptions): Promise<InteractivePreviewGrant>
+
+/**
+ * Close one preview grant idempotently.
+ * @param id - grant to close.
+ */
+async close(id: InteractivePreviewId): Promise<void>
+```
+
+Source: [`packages/host/interactive-preview/src/service.ts:113`](../../packages/host/interactive-preview/src/service.ts)
 
 <a id="ctxwebserver--webserver"></a>
 

@@ -57,7 +57,7 @@ async function bench() {
     summary: { title: 'R', displayTitle: 'R', cwd: '/proj' },
     session: sessionFake,
   })
-  const layoutFake = { openDetails: vi.fn(), closeDetails: vi.fn() }
+  const layoutFake = { openPanel: vi.fn(), closePanel: vi.fn() }
   runtime.provide('layout', layoutFake)
   const locale = new LocaleRuntime(runtime.ctx)
   runtime.provide('locale', locale)
@@ -67,7 +67,7 @@ async function bench() {
   // live entry before apply can contribute into them.
   await runtime.root.declare({
     'conversation': { kind: 'single', scope: 'session-maybe' },
-    'details': { kind: 'single', scope: 'session' },
+    'secondaryPanel': { kind: 'list', scope: 'session' },
   }, (_p: { renderSlot?: unknown }) => null)
 
   const feature = await runtime.mount({ inject: [...inject], apply })
@@ -75,7 +75,7 @@ async function bench() {
   // The host face (store resolution) exists only inside the installed
   // renderer, so materialize it the way the shell does.
   runtime.renderRoot()
-  const entryOf = (key: 'conversation' | 'conversation.session' | 'conversation.session.header' | 'conversation.composer.bar' | 'conversation.view' | 'details') =>
+  const entryOf = (key: 'conversation' | 'conversation.session' | 'conversation.session.header' | 'conversation.composer.bar' | 'conversation.view' | 'secondaryPanel') =>
     runtime.slots.entries(key)[0]!
   /** Resolve store instance + call the inject the way the outlet would. */
   const conversationApi = (id: SessionId) => {
@@ -222,7 +222,7 @@ describe('conversation slot inject API', () => {
     const { instance, injected } = b.chatViewApi(ROOT)
     injected.openDetails({ turnSeq: 2, callId: 'c1' })
     expect(instance.store.getSnapshot().selection).toEqual({ turnSeq: 2, callId: 'c1' })
-    expect(b.layoutFake.openDetails).toHaveBeenCalledTimes(1)
+    expect(b.layoutFake.openPanel).toHaveBeenCalledWith('tool-details')
     // The chat view shares the conversation entry's store instance: selection
     // writes land where the skeleton and details read.
     const conv = b.conversationApi(ROOT)
@@ -237,6 +237,41 @@ describe('conversation slot inject API', () => {
     await vi.waitFor(() => {
       expect(b.runtime.workspaces.calls).toContainEqual({ method: 'openPath', args: ['/proj/src/a.ts'] })
     })
+    await b.runtime.dispose()
+  })
+
+  it('openFile still natively opens markdown and html when no listener claims them', async () => {
+    const b = await bench()
+    const { injected } = b.chatViewApi(ROOT)
+    injected.openFile('notes.MD')
+    injected.openFile('site/Report.HTML')
+    await vi.waitFor(() => {
+      expect(b.runtime.workspaces.calls).toEqual(expect.arrayContaining([
+        { method: 'openPath', args: ['/proj/notes.MD'] },
+        { method: 'openPath', args: ['/proj/site/Report.HTML'] },
+      ]))
+    })
+    await b.runtime.dispose()
+  })
+
+  it('openFile skips workspaces.openPath when a waterfall listener claims the path', async () => {
+    const b = await bench()
+    const claimed: string[] = []
+    b.runtime.ctx.on('conversation/open-file', (request, next) => {
+      if (!request.path.toLowerCase().endsWith('.md')) {
+        next()
+        return
+      }
+      claimed.push(request.path)
+    })
+    const { injected } = b.chatViewApi(ROOT)
+    injected.openFile('README.md')
+    injected.openFile('src/a.ts')
+    expect(claimed).toEqual(['/proj/README.md'])
+    await vi.waitFor(() => {
+      expect(b.runtime.workspaces.calls).toContainEqual({ method: 'openPath', args: ['/proj/src/a.ts'] })
+    })
+    expect(b.runtime.workspaces.calls.some(c => c.method === 'openPath' && c.args[0] === '/proj/README.md')).toBe(false)
     await b.runtime.dispose()
   })
 
@@ -338,14 +373,14 @@ describe('conversation slot inject API', () => {
 describe('details inject API', () => {
   it('details injects the one layout callback; selection rides the shared store instead', async () => {
     const b = await bench()
-    const entry = b.entryOf('details')
+    const entry = b.entryOf('secondaryPanel')
     const injected = (entry.inject as unknown as () => DetailsInjected)()
     expect(Object.keys(injected)).toEqual(['closeDetails'])
     injected.closeDetails()
-    expect(b.layoutFake.closeDetails).toHaveBeenCalledTimes(1)
+    expect(b.layoutFake.closePanel).toHaveBeenCalledWith('tool-details')
     // The shared handle: details resolves the SAME instance conversation writes.
     const conv = b.runtime.storeOf('conversation.session', ROOT)
-    const details = b.runtime.storeOf('details', ROOT)
+    const details = b.runtime.storeOf('secondaryPanel', ROOT)
     expect(details).toBe(conv)
     await b.runtime.dispose()
   })

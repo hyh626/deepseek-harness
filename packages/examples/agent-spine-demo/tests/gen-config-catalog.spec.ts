@@ -71,6 +71,32 @@ export default class Fix {
     expect(entries[0]).toMatchObject({ kind: 'config', className: 'Fix', inject: ['llm'], schemaKeys: ['knob'] })
   })
 
+  it('follows a default re-export and reads inject/schema from the class file', () => {
+    const entries = collectConfigCatalog(make({
+      'src/index.ts': `export { default } from './service.ts'
+export { inject } from './service.ts'
+export type { Config } from './service.ts'
+`,
+      'src/service.ts': `import type { Context } from '@deepseek-ai/cordis'
+import z from '@deepseek-ai/schemastery'
+${DOCUMENTED_CONFIG}
+export const inject = ['sessions', 'fs'] as const
+/** Fixture service. */
+export default class Fix {
+  static Config = z.object({ knob: z.string() }) as unknown as z<Config>
+  constructor(ctx: Context, config: Config) {}
+}
+`,
+    }))
+    expect(entries[0]).toMatchObject({
+      kind: 'config',
+      className: 'Fix',
+      inject: ['sessions', 'fs'],
+      schemaKeys: ['knob'],
+    })
+    expect(entries[0]?.pastes?.[0]?.source).toBe('packages/group/one/src/service.ts:4')
+  })
+
   it('classifies an abstract default class as a seam', () => {
     const entries = collectConfigCatalog(make({
       'src/index.ts': 'export default abstract class FixSeam { abstract run(): void }\n',

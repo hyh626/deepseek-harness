@@ -9,6 +9,12 @@
   ],
   "references": [
     {
+      "path": "../../fs/fs"
+    },
+    {
+      "path": "../../fs/fs-local"
+    },
+    {
       "path": "../../goal/goal"
     },
     {
@@ -91,6 +97,9 @@
     },
     {
       "path": "../directory-picker"
+    },
+    {
+      "path": "../interactive-preview"
     },
     {
       "path": "../../extensions/cordis-host-runner"

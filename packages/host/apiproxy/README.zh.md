@@ -2,7 +2,7 @@
 
 [English](README.md) | 中文
 
-所有客户端共用的 API 网关由三部分组成：TypeScript API 约定（`src/api/`，不依赖 Node，可从浏览器导入）、fetch 载体对（`src/fetch/`：宿主侧的 `toFetchHandler`，以及客户端侧的 `AbstractApiClient` 与平台子类）和宿主侧实现（`src/api-proxy.ts`：`createApiProxy` 加上默认导出的 `ApiProxyService` 网关插件，其配置为 `{nativeOpen?, sessionExportCompressionLevel?, coldBlankProbeMaxBytes?}`，提供 `ctx.apiProxy`）。该包不注册任何路由；HTTP 等载体自行包装 `ctx.apiProxy`。随发行版交付的 Web 组合位于 [`packages/bundle/web-app/cordis.patch.yml`](../../bundle/web-app/cordis.patch.yml)，其默认 Agent（智能体）模型选择属于 base 组合包中的 [`@deepseek-ai/dsh-agent-default-model`](../../core/agent-default-model/README.md)。
+所有客户端共用的 API 网关由三部分组成：TypeScript API 约定（`src/api/`，不依赖 Node，可从浏览器导入）、fetch 载体对（`src/fetch/`：宿主侧的 `toFetchHandler`，以及客户端侧的 `AbstractApiClient` 与平台子类）和宿主侧实现（`src/api-proxy.ts`：`createApiProxy` 加上默认导出的 `ApiProxyService` 网关插件，其配置为 `{nativeOpen?, sessionExportCompressionLevel?, coldBlankProbeMaxBytes?, previewDocumentMaxBytes?, previewImageMaxBytes?}`，提供 `ctx.apiProxy`）。该包不注册任何路由；HTTP 等载体自行包装 `ctx.apiProxy`。随发行版交付的 Web 组合位于 [`packages/bundle/web-app/cordis.patch.yml`](../../bundle/web-app/cordis.patch.yml)，其默认 Agent（智能体）模型选择属于 base 组合包中的 [`@deepseek-ai/dsh-agent-default-model`](../../core/agent-default-model/README.md)。
 
 ## 共享 Agent 默认值（`agent-default-model` Settings 分节）
 
@@ -51,6 +51,10 @@ Workspace 列表与 Session 列表是相互独立的重连基线。`workspace.cr
 目录选择委托给组合的 `ctx.directoryPicker` 后端（[目录选择 seam](../directory-picker/README.md)）；调用组合能力 kind 之外的方法会以 `directory-picker-unavailable` 失败（客户端不需要广播——组合的选择器包自己的 client half 渲染匹配的交互）。在 `native` 下，`host.pickDirectory` 打开一个原生选择器并返回选中路径（取消为 `null`）；该方法需等待用户完成操作，不使用默认的 30 秒一元调用超时，而调用方与连接的中止仍会传播至原生进程。在 `browse` 下，`host.listDirectory` 返回一个按名称排序的目录层级，携带面包屑祖先链、`home` 锚点与宿主判定的 `hidden` 标志（不带路径即家目录），`host.createDirectory` 创建一个经校验的子段；后端的类型化失败 1:1 映射为 `directory-unreadable`／`directory-exists`／`directory-create-failed` 错误码。浏览器载体的前缀级信任栅栏（dsh-client-connection）像覆盖其他所有 `/api` 请求一样覆盖上述全部方法。
 
 `host.openPath` 会用操作系统的默认应用打开一个文件系统路径（macOS 为 `open`，Windows 为 `Invoke-Item`，桌面 Linux 为 `xdg-open`）。对于 `.html`、`.htm`、`.xhtml` 与 `.svg`，macOS 和桌面 Linux 会优先使用能够确定的默认浏览器；无法确定时回退到上述应用交接。WSL 会通过 `wslpath -w` 转换每个 Linux 路径，并将所得 Windows/UNC 路径交给 Windows `Invoke-Item`，浏览器可渲染的文档也不例外，而非假定存在 Linux 桌面文件关联。`host.describe.canOpenPath` 会宣告这次交接能否抵达用户可见的桌面：网关显式配置的 `nativeOpen` 优先，注入的 opener 按定义可用，否则平台检测接受 macOS、Windows、WSL 或带 display 的 Linux，并拒绝 headless／容器 Linux。浏览器载体对其施加与 `host.pickDirectory` 相同的回环、同源限制；客户端会组合这两个事实后再呈现原生操作。
+
+`host.readPreviewDocument` 与 `host.readPreviewImage` 为产品内文档面板供数，不会铸造 HTTP 文件 URL。两者都从被寻址 Session 的 cwd 经 `ctx.fs` 解析，要求目标为普通文件，并在解析符号链接后拒绝根目录之外的规范目标。文档接受 Markdown 与 HTML，受 `previewDocumentMaxBytes` 限制（默认 2 MiB）；图片接受 PNG、JPEG、WebP 与 GIF，受 `previewImageMaxBytes` 限制（默认 5 MiB），以 base64 返回。静态安全姿态由[文档预览决策](../../../.agents/notes/implemented/feature/2026-08-18-web-document-preview.md)拥有。
+
+`host.startInteractivePreview` 与 `host.stopInteractivePreview` 通过 `ctx.interactivePreview` 为一个 HTML 入口铸造并撤销一个唯一源 HTTP grant。启动载荷为 `{ sessionId, path, parentOrigin }`；响应为带品牌的 grant id 加上完整 `http://` 源。停止是幂等的。缺少提供方时回答 `preview-unavailable`。同意、iframe sandbox 与 grant 寿命由文档预览面板拥有（[交互预览决策](../../../.agents/notes/implemented/feature/2026-09-08-web-interactive-document-preview.md)）。
 
 `agentPreset.list` 领域向浏览器暴露部署的 preset 名单，使其在开启会话时能够提供选择；每一行携带它的 `trust`（`user` preset 的权限恰好等于它所引用的插件）、它是否为当前默认值，以及——当该 preset 无法组装会话时——一条 `broken` 原因：损坏的目录仍占着它的 id，界面必须能展示并删除它，而不是把它端出来然后在会话启动时失败。未组装任何 preset 的部署返回空名单而非错误，因为共用宿主组装本身就是一种有效部署。`agentPreset.select` 用另一个 preset 重组某个会话的 agent，且仅在会话空白时允许：一旦跑过任何轮次，那段历史就是在该 preset 的工具下产生的，替换会留下无法执行的已记录的工具调用，此时返回 `agent-preset-locked`。agent 与会话都不销毁——只替换组装，且替换失败会恢复原来的组装。
 

@@ -12,7 +12,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { SlotRegistry } from '@deepseek-ai/dsh-client-runtime/client'
 import { LocaleRuntime } from '@deepseek-ai/dsh-client-locale/client'
 import { apply as themeApply, inject as themeInject, ThemeRuntime } from '@deepseek-ai/dsh-client-ui-theme/client'
-import { apply, inject, LayoutController } from '@deepseek-ai/dsh-client-ui-layout/client'
+import { apply, inject, LayoutController, LayoutPanelId } from '@deepseek-ai/dsh-client-ui-layout/client'
 import { apply as nodeApply } from '@deepseek-ai/dsh-client-ui-layout'
 import * as invariant from '@deepseek-ai/dsh-client-ui-layout/invariant'
 
@@ -50,7 +50,7 @@ describe('ui-layout client apply', () => {
     // …and declared the three children in the ledger.
     expect(slots.spec('sidebar')).toEqual({ kind: 'single', scope: 'root' })
     expect(slots.spec('conversation')).toEqual({ kind: 'single', scope: 'session-maybe' })
-    expect(slots.spec('details')).toEqual({ kind: 'single', scope: 'session' })
+    expect(slots.spec('secondaryPanel')).toEqual({ kind: 'list', scope: 'session' })
   })
 
   it('injects no business face and attaches the layout actions', async () => {
@@ -58,13 +58,36 @@ describe('ui-layout client apply', () => {
     const fiber = ctx.plugin({ inject: [...inject], apply })
     await fiber.await()
     const actions = {
-      setSidebar: vi.fn(), setDetails: vi.fn(), toggleSidebar: vi.fn(), openDetails: vi.fn(), closeDetails: vi.fn(),
+      setSidebar: vi.fn(), setSecondary: vi.fn(), toggleSidebar: vi.fn(),
+      openPanel: vi.fn(), closePanel: vi.fn(),
     }
     const injected = (slots.entries('root')[0]!.inject as (actions: never) => object)(actions as never)
     expect(injected).toEqual({})
     const layout = ctx.get('layout') as LayoutController
     layout.toggleSidebar()
     expect(actions.toggleSidebar).toHaveBeenCalledOnce()
+  })
+
+  it('closes an active secondary panel when its registration is disposed', async () => {
+    const { ctx, slots } = await bench()
+    const fiber = ctx.plugin({ inject: [...inject], apply })
+    await fiber.await()
+    const actions = {
+      setSidebar: vi.fn(), setSecondary: vi.fn(), toggleSidebar: vi.fn(),
+      openPanel: vi.fn(), closePanel: vi.fn(),
+    }
+    const rootEntry = slots.entries('root')[0]!
+    ;(rootEntry.inject as (actions: never) => object)(actions as never)
+    const panelId = LayoutPanelId('hmr-panel')
+    const disposePanel = slots.register({ name: 'secondaryPanel', id: panelId }, () => null)
+    const layout = ctx.get('layout') as LayoutController
+    layout.openPanel(panelId)
+
+    disposePanel()
+
+    await vi.waitFor(() => {
+      expect(actions.closePanel).toHaveBeenCalledWith(panelId)
+    })
   })
 
   it('theme presenter applies the initial snapshot, follows theme/change, and unwinds on dispose', async () => {

@@ -16,6 +16,8 @@ import { hostFrameSchema, muxFrameSchema } from '../api/events.schema.ts'
 import {
   hostCreateDirectoryValueSchema, hostDescribeValueSchema,
   hostListDirectoryValueSchema, hostOpenPathValueSchema, hostPickDirectoryValueSchema,
+  hostReadPreviewDocumentValueSchema, hostReadPreviewImageValueSchema,
+  hostStartInteractivePreviewValueSchema, hostStopInteractivePreviewValueSchema,
 } from '../api/host.schema.ts'
 import {
   sessionCancelValueSchema,
@@ -111,6 +113,10 @@ export interface IApiClient {
     listDirectory(payload: RequestPayload<'host.listDirectory'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'host.listDirectory'>>>
     createDirectory(payload: RequestPayload<'host.createDirectory'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'host.createDirectory'>>>
     openPath(payload: RequestPayload<'host.openPath'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'host.openPath'>>>
+    readPreviewDocument(payload: RequestPayload<'host.readPreviewDocument'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'host.readPreviewDocument'>>>
+    readPreviewImage(payload: RequestPayload<'host.readPreviewImage'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'host.readPreviewImage'>>>
+    startInteractivePreview(payload: RequestPayload<'host.startInteractivePreview'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'host.startInteractivePreview'>>>
+    stopInteractivePreview(payload: RequestPayload<'host.stopInteractivePreview'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'host.stopInteractivePreview'>>>
   }
   workspace: {
     list(payload: RequestPayload<'workspace.list'>, signal?: AbortSignal): Promise<RpcResponse<ResponseValue<'workspace.list'>>>
@@ -191,6 +197,10 @@ const UNARY_VALUE_SCHEMAS: { [K in keyof RpcMethodMap]: z.ZodType<Wire<ResponseV
   'host.listDirectory': hostListDirectoryValueSchema,
   'host.createDirectory': hostCreateDirectoryValueSchema,
   'host.openPath': hostOpenPathValueSchema,
+  'host.readPreviewDocument': hostReadPreviewDocumentValueSchema,
+  'host.readPreviewImage': hostReadPreviewImageValueSchema,
+  'host.startInteractivePreview': hostStartInteractivePreviewValueSchema,
+  'host.stopInteractivePreview': hostStopInteractivePreviewValueSchema,
   'workspace.list': workspaceListValueSchema,
   'workspace.create': workspaceCreateValueSchema,
   'workspace.rename': workspaceRenameValueSchema,
@@ -441,6 +451,10 @@ export abstract class AbstractApiClient implements IApiClient {
     listDirectory: (payload, signal) => this.callUnary('host.listDirectory', payload, signal),
     createDirectory: (payload, signal) => this.callUnary('host.createDirectory', payload, signal),
     openPath: (payload, signal) => this.callUnary('host.openPath', payload, signal),
+    readPreviewDocument: (payload, signal) => this.callUnary('host.readPreviewDocument', payload, signal),
+    readPreviewImage: (payload, signal) => this.callUnary('host.readPreviewImage', payload, signal),
+    startInteractivePreview: (payload, signal) => this.callUnary('host.startInteractivePreview', payload, signal),
+    stopInteractivePreview: (payload, signal) => this.callUnary('host.stopInteractivePreview', payload, signal),
   }
 
   readonly workspace: IApiClient['workspace'] = {

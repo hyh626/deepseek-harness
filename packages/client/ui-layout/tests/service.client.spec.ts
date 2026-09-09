@@ -6,45 +6,63 @@
  */
 import { describe, expect, it, vi } from 'vitest'
 import { LayoutController } from '@deepseek-ai/dsh-client-ui-layout/src/client/service.ts'
-import type { PanelActions } from '@deepseek-ai/dsh-client-ui-layout/src/client/service.ts'
+import { LayoutPanelId, type PanelActions } from '@deepseek-ai/dsh-client-ui-layout/src/client/service.ts'
+
+const TOOL_DETAILS = LayoutPanelId('tool-details')
+const DOCUMENT_PREVIEW = LayoutPanelId('document-preview')
 
 function fakePanels(): PanelActions {
   return {
     setSidebar: vi.fn(),
-    setDetails: vi.fn(),
+    setSecondary: vi.fn(),
     toggleSidebar: vi.fn(),
     setNarrow: vi.fn(),
-    openDetails: vi.fn(),
-    closeDetails: vi.fn(),
+    openPanel: vi.fn(),
+    closePanel: vi.fn(),
   }
 }
 
 describe('LayoutController', () => {
-  it('forwards the three panel actions to the attached set', () => {
-    const service = new LayoutController()
+  it('owns the constructor for secondary-panel ids', () => {
+    expect(LayoutPanelId('tool-details')).toBe('tool-details')
+  })
+
+  it('opens registered panels exclusively and closes by owner id', () => {
+    const service = new LayoutController(id => id === TOOL_DETAILS || id === DOCUMENT_PREVIEW)
     const panels = fakePanels()
     service.attachPanels(panels)
 
     service.toggleSidebar()
-    service.openDetails()
-    service.closeDetails()
+    service.openPanel(TOOL_DETAILS)
+    service.openPanel(DOCUMENT_PREVIEW)
+    service.closePanel(TOOL_DETAILS)
 
     expect(panels.toggleSidebar).toHaveBeenCalledTimes(1)
-    expect(panels.openDetails).toHaveBeenCalledTimes(1)
-    expect(panels.closeDetails).toHaveBeenCalledTimes(1)
+    expect(panels.openPanel).toHaveBeenNthCalledWith(1, TOOL_DETAILS)
+    expect(panels.openPanel).toHaveBeenNthCalledWith(2, DOCUMENT_PREVIEW)
+    expect(panels.closePanel).toHaveBeenCalledWith(TOOL_DETAILS)
     expect(panels.setSidebar).not.toHaveBeenCalled()
-    expect(panels.setDetails).not.toHaveBeenCalled()
+    expect(panels.setSecondary).not.toHaveBeenCalled()
+  })
+
+  it('refuses an unregistered panel without changing layout state', () => {
+    const service = new LayoutController(id => id === TOOL_DETAILS)
+    const panels = fakePanels()
+    service.attachPanels(panels)
+
+    expect(() => { service.openPanel(DOCUMENT_PREVIEW) }).toThrow(/not registered/)
+    expect(panels.openPanel).not.toHaveBeenCalled()
   })
 
   it('fails loud before the root entry wired its actions', () => {
-    const service = new LayoutController()
+    const service = new LayoutController(() => true)
     expect(() => { service.toggleSidebar() }).toThrow(/panel actions not wired/)
-    expect(() => { service.openDetails() }).toThrow(/panel actions not wired/)
-    expect(() => { service.closeDetails() }).toThrow(/panel actions not wired/)
+    expect(() => { service.openPanel(TOOL_DETAILS) }).toThrow(/panel actions not wired/)
+    expect(() => { service.closePanel(TOOL_DETAILS) }).toThrow(/panel actions not wired/)
   })
 
   it('re-attach overwrites the stale action set (entry re-register)', () => {
-    const service = new LayoutController()
+    const service = new LayoutController(() => true)
     const stale = fakePanels()
     const fresh = fakePanels()
     service.attachPanels(stale)

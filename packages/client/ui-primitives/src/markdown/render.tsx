@@ -22,7 +22,11 @@ import type * as Md from 'mdast'
 import type {} from 'mdast-util-math'
 import { normalizeUri } from 'micromark-util-sanitize-uri'
 import { CodeBlock } from './CodeBlock.tsx'
+import { MermaidBlock } from './MermaidBlock.tsx'
+import type { MermaidRenderer } from './MermaidBlock.tsx'
 import { renderTexToReact } from './katex.tsx'
+
+export type { MermaidRenderer } from './MermaidBlock.tsx'
 import type { PositionedBlock } from './incremental.ts'
 import css from './MarkdownText.module.css'
 
@@ -125,6 +129,15 @@ export interface MarkdownRenderContext {
   readonly codeLabels: MarkdownCodeLabels | undefined
   /** Inline-code file mentions; absent wherever no opener vocabulary exists. */
   readonly fileMentions: MarkdownFileMentions | undefined
+  /** Settled mermaid fence renderer; absent keeps generic CodeBlock output. */
+  readonly mermaid: MermaidRenderer | undefined
+  /** Localized mermaid failure copy. */
+  readonly mermaidErrorLabel: string | undefined
+  /**
+   * Rewrite a markdown image destination the HTTP(S) allowlist rejected.
+   * Preview owners map contained relative paths onto blob URLs.
+   */
+  readonly resolveImageSrc: ((url: string) => string | undefined) | undefined
   /** Inside an anchor's children: interactive mentions must not nest there. */
   readonly inLink?: boolean
   /** Reference targets visible to this pass. */
@@ -279,7 +292,7 @@ function renderNode(node: Md.RootContent, key: Key, context: MarkdownRenderConte
     case 'linkReference':
       return renderLinkReference(node, key, context)
     case 'image':
-      return renderImage(node.url, node.alt ?? '', key)
+      return renderImage(node.url, node.alt ?? '', key, context)
     case 'imageReference':
       return renderImageReference(node, key, context)
     case 'footnoteReference':
@@ -310,6 +323,18 @@ function renderCode(node: Md.Code, key: Key, context: MarkdownRenderContext): Re
   // The replaced pipeline recovered the grammar id from the hast class with
   // /language-([\w-]+)/, which truncates at the first non-word character.
   const lang = language === undefined ? undefined : /^[\w-]+/.exec(language)?.[0]
+  if (!context.streaming && lang === 'mermaid' && context.mermaid !== undefined) {
+    return (
+      <MermaidBlock
+        key={key}
+        source={node.value}
+        renderer={context.mermaid}
+        errorLabel={context.mermaidErrorLabel}
+        copyLabel={context.codeLabels?.copyLabel}
+        copiedLabel={context.codeLabels?.copiedLabel}
+      />
+    )
+  }
   if (!context.streaming && lang === 'math') {
     // ```math fences render as display TeX once settled (rehype-katex parity);
     // its text extraction saw the code block's trailing newline.
@@ -468,8 +493,9 @@ function inlineCodeHttpUrl(value: string): string | undefined {
   }
 }
 
-function renderImage(url: string, alt: string, key: Key): ReactNode {
+function renderImage(url: string, alt: string, key: Key, context: MarkdownRenderContext): ReactNode {
   const imageSrc = remoteImageUrl(sanitizeUrl(normalizeUri(url)))
+    ?? context.resolveImageSrc?.(url)
   if (imageSrc === undefined) {
     return <span key={key} className={css.imageAlt}>{alt}</span>
   }
@@ -516,7 +542,7 @@ function renderImageReference(
 ): ReactNode {
   const definition = context.targets.definitions.get(node.identifier.toUpperCase())
   if (definition === undefined) return `![${node.alt ?? ''}${referenceSuffix(node)}`
-  return renderImage(definition.url, node.alt ?? '', key)
+  return renderImage(definition.url, node.alt ?? '', key, context)
 }
 
 function renderFootnoteReference(

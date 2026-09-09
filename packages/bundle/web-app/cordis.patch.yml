@@ -94,6 +94,13 @@
     - id: plugin-inventory
       name: '@deepseek-ai/dsh-host-plugin-inventory'
 
+    # Ephemeral unique-origin HTTP grants for interactive HTML preview.
+    - id: interactive-preview
+      name: '@deepseek-ai/dsh-host-interactive-preview'
+      config:
+        bindHost: '127.0.0.1'
+        hostnameSuffix: localhost
+
     # The API gateway: the transport-agnostic dispatch face every client shape
     # shares. The base layer's agent-default-model service owns the default model.
     - id: api-gateway
@@ -218,6 +225,9 @@
 
     - id: ui-workspace
       name: '@deepseek-ai/dsh-client-ui-workspace'
+
+    - id: ui-document-preview
+      name: '@deepseek-ai/dsh-client-ui-document-preview'
 
     # Input triggers: the '/' | '@' pipeline (ui-input-trigger), the command surface over
     # it (ui-commands), and the two reference sources (ui-skill / ui-subagent).

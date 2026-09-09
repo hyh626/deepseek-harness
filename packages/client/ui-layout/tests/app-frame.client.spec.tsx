@@ -5,7 +5,7 @@
  * path), a recording renderSlot stub, and a render-prop SessionProvider stub
  * (the real one is framework-wired to the renderer host; its own behavior is
  * web-react's spec territory). Drag sequences (pointer capture + rAF flush),
- * concession response to viewport change, and details staying mounted at
+ * concession response to viewport change, and the secondary column staying mounted at
  * zero width are the preserved behavior assertions. jsdom has no layout
  * engine, so the frame width comes from a mocked getBoundingClientRect and
  * resizes are driven through the ResizeObserver stub.
@@ -15,6 +15,7 @@ import { act, cleanup, render } from '@testing-library/react'
 import { useSyncExternalStore } from 'react'
 import { AppFrame } from '@deepseek-ai/dsh-client-ui-layout/src/client/AppFrame.tsx'
 import type { AppFrameProps } from '@deepseek-ai/dsh-client-ui-layout/src/client/AppFrame.tsx'
+import type { LayoutPanelId } from '@deepseek-ai/dsh-client-ui-layout/client'
 import { SIDEBAR_COLLAPSED } from '@deepseek-ai/dsh-client-ui-layout/src/client/columns.ts'
 import { createLayoutStore } from '@deepseek-ai/dsh-client-ui-layout/src/client/stores.ts'
 import type {
@@ -25,6 +26,7 @@ import type {
 const selectedSession = { current: 's-test' as SessionId | undefined }
 const selectedSessionBlank = { current: false }
 const baselinesReady = { current: true }
+const TOOL_DETAILS = 'tool-details' as LayoutPanelId
 
 // Render-prop contract stub fed through the standard seat prop (the renderer
 // injects the real one in production): session mode runs children(id), empty
@@ -55,12 +57,12 @@ function hookOf<T>(inst: { subscribe: (fn: () => void) => () => void; getSnapsho
 function mountFrame() {
   window.innerWidth = frameWidth // first-render viewport source before the observer fires
   const instance = createLayoutStore().create()
-  const slotCalls: { key: string; props: unknown }[] = []
-  const renderSlot = ((key: string, owner: object) => {
-    slotCalls.push({ key, props: owner })
+  const slotCalls: { key: string; props: unknown; only?: string }[] = []
+  const renderSlot = ((key: string, owner: object, options?: { only?: string }) => {
+    slotCalls.push({ key, props: owner, ...(options?.only === undefined ? {} : { only: options.only }) })
     if (key === 'sidebar') return <div data-testid="sidebar-content" />
     if (key === 'conversation') return <div data-testid="center-content" />
-    if (key === 'details') return <div data-testid="details-content" />
+    if (key === 'secondaryPanel') return <div data-testid="secondary-content" />
     if (key === 'conversation.empty') return <div data-testid="empty-content" />
     return <div data-testid="other-content" />
   }) as AppFrameProps['renderSlot']
@@ -142,16 +144,24 @@ describe('AppFrame', () => {
     expect(tracks(frame)).toEqual([280, 0])
   })
 
-  it('renders the session pair with empty owner shares (sessionId is framework-standard)', () => {
+  it('renders only the active secondary-panel entry', () => {
+    const { frame, instance, slotCalls, getByTestId } = mountFrame()
+    act(() => { instance.actions.openPanel(TOOL_DETAILS) })
+
+    expect(tracks(frame)).toEqual([280, 360])
+    expect(getByTestId('secondary-content')).toBeTruthy()
+    expect(slotCalls.filter(call => call.key === 'secondaryPanel').at(-1))
+      .toMatchObject({ props: {}, only: TOOL_DETAILS })
+  })
+
+  it('renders the conversation while no secondary panel is active', () => {
     const { slotCalls, getByTestId } = mountFrame()
     expect(getByTestId('center-content')).toBeTruthy()
-    expect(getByTestId('details-content')).toBeTruthy()
     const keys = slotCalls.map(c => c.key)
     expect(keys).toContain('conversation')
-    expect(keys).toContain('details')
+    expect(keys).not.toContain('secondaryPanel')
     expect(keys).not.toContain('conversation.empty')
     expect(slotCalls.find(c => c.key === 'conversation')!.props).toEqual({})
-    expect(slotCalls.find(c => c.key === 'details')!.props).toEqual({})
   })
 
   it('keeps the conversation slot mounted while no session is current', () => {
@@ -163,32 +173,32 @@ describe('AppFrame', () => {
     expect(slotCalls.map(c => c.key)).toContain('conversation')
   })
 
-  it('renders both column occupants before baselines settle (no loading gate)', () => {
+  it('renders the conversation occupant before baselines settle (no loading gate)', () => {
     // No loading gate: a bare loading status reads worse than the shell's own
-    // pending rendering — both occupants mount from first paint.
+    // pending rendering — the conversation mounts from first paint.
     baselinesReady.current = false
     const { slotCalls } = mountFrame()
     expect(slotCalls.map(c => c.key)).toContain('conversation')
-    expect(slotCalls.map(c => c.key)).toContain('details')
+    expect(slotCalls.map(c => c.key)).not.toContain('secondaryPanel')
   })
 
   it('ignores unselected states and closes only when the Session id changes', () => {
     const { frame, instance, rerenderFrame } = mountFrame()
     expect(tracks(frame)).toEqual([280, 0])
 
-    act(() => { instance.actions.openDetails() })
+    act(() => { instance.actions.openPanel(TOOL_DETAILS) })
     expect(tracks(frame)).toEqual([280, 360])
 
     selectedSession.current = 's-next' as SessionId
     act(() => { rerenderFrame() })
     expect(tracks(frame)).toEqual([280, 0])
 
-    act(() => { instance.actions.openDetails() })
+    act(() => { instance.actions.openPanel(TOOL_DETAILS) })
     selectedSession.current = 's-blank' as SessionId
     selectedSessionBlank.current = true
     act(() => { rerenderFrame() })
     expect(tracks(frame)).toEqual([280, 0])
-    expect(instance.getSnapshot().details).toBe(360)
+    expect(instance.getSnapshot()).toMatchObject({ secondary: 360, activePanel: TOOL_DETAILS })
 
     selectedSession.current = 's-next' as SessionId
     selectedSessionBlank.current = false
@@ -203,11 +213,11 @@ describe('AppFrame', () => {
     expect(tracks(frame)).toEqual([280, 0])
   })
 
-  it('keeps details closed when the first Session materializes', () => {
+  it('keeps the secondary panel closed when the first Session materializes', () => {
     selectedSession.current = undefined
     const { frame, instance, rerenderFrame } = mountFrame()
     expect(tracks(frame)).toEqual([280, 0])
-    expect(instance.getSnapshot().details).toBe(0)
+    expect(instance.getSnapshot()).toMatchObject({ secondary: 0, activePanel: null })
 
     selectedSession.current = 's-first' as SessionId
     act(() => { rerenderFrame() })
@@ -226,29 +236,37 @@ describe('AppFrame', () => {
     expect(tracks(frame)[0]).toBe(350)
   })
 
-  it('details drag widens leftward (negative dx grows the panel)', () => {
+  it('secondary-panel drag widens leftward (negative dx grows the panel)', () => {
     const { frame, instance } = mountFrame()
-    act(() => { instance.actions.openDetails() })
+    act(() => { instance.actions.openPanel(TOOL_DETAILS) })
     const handles = frame.querySelectorAll('[class*="handle"]')
     drag(handles[1]!, 1560, 1500)
     expect(tracks(frame)[1]).toBe(420)
   })
 
-  it('drag base is the rendered (concession-clamped) width, not the preference', () => {
-    frameWidth = 1250 // step-2 squeeze: details renders 330 while preference is 360
+  it('secondary-panel drag can use all width above the center floor', () => {
     const { frame, instance } = mountFrame()
-    act(() => { instance.actions.openDetails() })
+    act(() => { instance.actions.openPanel(TOOL_DETAILS) })
+    const handles = frame.querySelectorAll('[class*="handle"]')
+    drag(handles[1]!, 1560, 0)
+    expect(tracks(frame)).toEqual([280, 1000])
+  })
+
+  it('drag base is the rendered (concession-clamped) width, not the preference', () => {
+    frameWidth = 1250 // step-2 squeeze: the secondary panel renders 330 while preference is 360
+    const { frame, instance } = mountFrame()
+    act(() => { instance.actions.openPanel(TOOL_DETAILS) })
     expect(tracks(frame)).toEqual([280, 330])
     const handles = frame.querySelectorAll('[class*="handle"]')
     drag(handles[1]!, 920, 930) // shrink by 10 from the rendered width
-    expect(instance.getSnapshot().details).toBe(320)
+    expect(instance.getSnapshot().secondary).toBe(320)
   })
 
-  it('details column stays mounted at zero width', () => {
-    const { frame, getByTestId } = mountFrame()
+  it('secondary column stays mounted at zero width without rendering an entry', () => {
+    const { frame, queryByTestId } = mountFrame()
     expect(tracks(frame)).toEqual([280, 0])
-    expect(getByTestId('details-content')).toBeTruthy()
-    expect(frame.hasAttribute('data-details-collapsed')).toBe(true)
+    expect(queryByTestId('secondary-content')).toBeNull()
+    expect(frame.hasAttribute('data-secondary-collapsed')).toBe(true)
   })
 
   it('closed sidebar keeps its compact rail with mounted slot content and collapsed owner props', () => {
@@ -263,7 +281,7 @@ describe('AppFrame', () => {
 
   it('viewport shrink triggers the concession chain via ResizeObserver', () => {
     const { frame, instance } = mountFrame()
-    act(() => { instance.actions.openDetails() })
+    act(() => { instance.actions.openPanel(TOOL_DETAILS) })
     frameWidth = 1250
     act(() => { fireResize?.(); vi.advanceTimersByTime(20) })
     expect(tracks(frame)).toEqual([280, 330])
@@ -275,9 +293,9 @@ describe('AppFrame', () => {
   it('drag handles disappear for collapsed columns', () => {
     const { frame, instance } = mountFrame()
     expect(frame.querySelectorAll('[class*="handle"]')).toHaveLength(1)
-    act(() => { instance.actions.openDetails() })
+    act(() => { instance.actions.openPanel(TOOL_DETAILS) })
     expect(frame.querySelectorAll('[class*="handle"]')).toHaveLength(2)
-    act(() => { instance.actions.closeDetails() })
+    act(() => { instance.actions.closePanel(TOOL_DETAILS) })
     expect(frame.querySelectorAll('[class*="handle"]')).toHaveLength(1)
     act(() => { instance.actions.toggleSidebar() })
     expect(frame.querySelectorAll('[class*="handle"]')).toHaveLength(0)
@@ -390,7 +408,7 @@ describe('AppFrame — unmount with an in-flight resize frame', () => {
 
   it('double resize inside one frame rides the pending rAF (??= guard)', () => {
     const { frame, instance } = mountFrame()
-    act(() => { instance.actions.openDetails() })
+    act(() => { instance.actions.openPanel(TOOL_DETAILS) })
     frameWidth = 1250
     act(() => { fireResize?.(); fireResize?.(); vi.advanceTimersByTime(20) })
     expect(tracks(frame)).toEqual([280, 330])

@@ -2562,6 +2562,26 @@ function createFixtureWorld(options: FixtureOptions): FixtureWorld {
         return ok(request, { path: target })
       },
       openPath: request => ok(request, { opened: true as const }),
+      readPreviewDocument: request => err(request, {
+        code: 'preview-unavailable',
+        message: 'the fixture host does not mount a preview filesystem',
+        details: {},
+      }),
+      readPreviewImage: request => err(request, {
+        code: 'preview-unavailable',
+        message: 'the fixture host does not mount a preview filesystem',
+        details: {},
+      }),
+      startInteractivePreview: request => err(request, {
+        code: 'preview-unavailable',
+        message: 'the fixture host does not mount interactive preview',
+        details: {},
+      }),
+      stopInteractivePreview: request => err(request, {
+        code: 'preview-unavailable',
+        message: 'the fixture host does not mount interactive preview',
+        details: {},
+      }),
     },
     workspace: {
       list: request => ok(request, {
@@ -3098,6 +3118,10 @@ export class FixtureApiClient extends AbstractApiClient {
       case 'host.listDirectory': return this.api.host.listDirectory(request, new AbortController().signal)
       case 'host.createDirectory': return this.api.host.createDirectory(request)
       case 'host.openPath': return this.api.host.openPath(request, new AbortController().signal)
+      case 'host.readPreviewDocument': return this.api.host.readPreviewDocument(request, signal)
+      case 'host.readPreviewImage': return this.api.host.readPreviewImage(request, signal)
+      case 'host.startInteractivePreview': return this.api.host.startInteractivePreview(request, signal)
+      case 'host.stopInteractivePreview': return this.api.host.stopInteractivePreview(request, signal)
       case 'workspace.list': return this.api.workspace.list(request)
       case 'workspace.create': return this.api.workspace.create(request)
       case 'workspace.rename': return this.api.workspace.rename(request)

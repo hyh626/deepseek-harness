@@ -2,7 +2,7 @@
 // data source on a real clock; behavior tests need per-case responses and
 // deferred-controlled timing). Streams are hand pumps: pushMux/pushHost.
 import type {
-  ClientResponse, HostFrame, IApiClient, ModelSelection, MuxFrame,
+  ClientResponse, HostFrame, IApiClient, InteractivePreviewId, ModelSelection, MuxFrame,
   RpcError, RpcReceipt, RpcRequest, RpcResponse, SessionId, SessionModels, SessionSearchItem, SkillEntry,
   WorkspaceId, WorkspaceView,
 } from '@deepseek-ai/dsh-api-remotes/client'
@@ -117,6 +117,14 @@ export class FakeApiClient implements IApiClient {
     () => Promise.resolve(ok({ path: null }))
   onOpenPath: (payload: unknown) => Promise<RpcResponse<{ opened: true }>> =
     () => Promise.resolve(ok({ opened: true as const }))
+  onReadPreviewDocument: (payload: unknown) => Promise<RpcResponse<{ path: string; format: 'markdown' | 'html'; content: string }>> =
+    () => Promise.resolve(ok({ path: '/f/doc.md', format: 'markdown', content: '# doc' }))
+  onReadPreviewImage: (payload: unknown) => Promise<RpcResponse<{ mediaType: 'image/png'; data: string }>> =
+    () => Promise.resolve(ok({ mediaType: 'image/png', data: 'AA==' }))
+  onStartInteractivePreview: (payload: unknown) => Promise<RpcResponse<{ id: InteractivePreviewId; origin: string }>> =
+    () => Promise.resolve(ok({ id: 'preview-grant' as InteractivePreviewId, origin: 'http://abc.localhost:1' }))
+  onStopInteractivePreview: (payload: unknown) => Promise<RpcResponse<{ stopped: true }>> =
+    () => Promise.resolve(ok({ stopped: true as const }))
 
   onListDirectory: (payload: unknown) => Promise<RpcResponse<{
     path: string
@@ -180,6 +188,14 @@ export class FakeApiClient implements IApiClient {
     listDirectory: (payload: unknown) => this.record('host.listDirectory', payload, this.onListDirectory(payload)),
     createDirectory: (payload: unknown) => this.record('host.createDirectory', payload, this.onCreateDirectory(payload)),
     openPath: (payload: unknown) => this.record('host.openPath', payload, this.onOpenPath(payload)),
+    readPreviewDocument: (payload: unknown) =>
+      this.record('host.readPreviewDocument', payload, this.onReadPreviewDocument(payload)),
+    readPreviewImage: (payload: unknown) =>
+      this.record('host.readPreviewImage', payload, this.onReadPreviewImage(payload)),
+    startInteractivePreview: (payload: unknown) =>
+      this.record('host.startInteractivePreview', payload, this.onStartInteractivePreview(payload)),
+    stopInteractivePreview: (payload: unknown) =>
+      this.record('host.stopInteractivePreview', payload, this.onStopInteractivePreview(payload)),
   }
 
   // The archive-set field defaults at the binding below so list stubs keep
