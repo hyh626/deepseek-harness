@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { SessionId } from '@deepseek-ai/dsh-client-runtime/client'
-import { createSnapshotStore } from '@deepseek-ai/dsh-client-runtime/client'
+import type { SessionId } from '@deepseek-ai/dsh-session/types'
+import { createSnapshotStore } from '@deepseek-ai/dsh-client-store'
 import { DocumentPreviewPanel } from '../src/client/DocumentPreviewPanel.tsx'
 import type { DocumentPreviewSlotProps } from '../src/client/DocumentPreviewPanel.tsx'
 import type { DocumentPreviewView, IDocumentPreview } from '../src/client/controller.ts'
@@ -14,7 +14,11 @@ vi.mock('../src/client/mermaid.ts', () => ({
   previewMermaidRenderer: { render: () => Promise.resolve('<svg></svg>') },
 }))
 
-const sid = 's1' as SessionId
+const sid = 's-1' as SessionId
+const ADDRESS = 'dsh-resource://file/session/s-1/work/notes.md'
+const HTML_ADDRESS = 'dsh-resource://file/session/s-1/work/page.html'
+const PATH = 'work/notes.md'
+const HTML_PATH = 'work/page.html'
 
 const IDLE: DocumentPreviewView = {
   status: 'idle',
@@ -47,18 +51,45 @@ function t(key: keyof typeof en): string {
   return en[key]
 }
 
-function panelProps(preview: IDocumentPreview): DocumentPreviewSlotProps {
-  return { sessionId: sid, preview, t } as DocumentPreviewSlotProps
+function panelProps(
+  preview: IDocumentPreview,
+  address = ADDRESS,
+  controller = new AbortController(),
+): DocumentPreviewSlotProps {
+  return {
+    sessionId: sid,
+    preview,
+    t,
+    useTabInfo: () => ({
+      sidebar: { expanded: true, fullscreen: false },
+      panel: { id: 'pane-1' },
+      tab: {
+        id: 'tab-1',
+        kind: 'document',
+        contentId: address,
+        title: 'notes.md',
+        visible: true,
+        navigation: { address, params: undefined, revision: 1 },
+        signal: controller.signal,
+        actions: { openResource: vi.fn(), openTab: vi.fn(), close: vi.fn() },
+      },
+    }),
+  } as unknown as DocumentPreviewSlotProps
 }
 
 describe('DocumentPreviewPanel', () => {
-  it('shows the empty state and wires close', () => {
+  it('opens the addressed file on mount and closes when the tab aborts', async () => {
     const preview = fakePreview(IDLE)
-    const { getByLabelText, getByText } = render(
-      <DocumentPreviewPanel {...panelProps(preview)} />,
+    const controller = new AbortController()
+    const { getByText, queryByLabelText } = render(
+      <DocumentPreviewPanel {...panelProps(preview, ADDRESS, controller)} />,
     )
+    await waitFor(() => {
+      expect(preview.open).toHaveBeenCalledWith(sid, PATH)
+    })
     expect(getByText(en.empty)).toBeTruthy()
-    fireEvent.click(getByLabelText(en.close))
+    expect(queryByLabelText('Close preview')).toBeNull()
+    controller.abort()
     expect(preview.close).toHaveBeenCalledWith(sid)
   })
 
@@ -169,11 +200,12 @@ describe('DocumentPreviewPanel', () => {
       startingInteractive: false,
       interactiveError: null,
     })
-    const htmlView = render(<DocumentPreviewPanel {...panelProps(html)} />)
+    const htmlView = render(<DocumentPreviewPanel {...panelProps(html, HTML_ADDRESS)} />)
     await waitFor(() => {
       expect(htmlView.container.querySelector('iframe')?.getAttribute('sandbox')).toBe('allow-same-origin')
     })
     expect(htmlView.container.querySelector('iframe')?.getAttribute('srcdoc')).toBe('<p>Hello</p>')
+    expect(html.open).toHaveBeenCalledWith(sid, HTML_PATH)
   })
 
   it('confirms interactive preview and loads an isolated origin iframe', () => {
@@ -190,7 +222,7 @@ describe('DocumentPreviewPanel', () => {
       startingInteractive: false,
       interactiveError: 'grant failed',
     })
-    const htmlView = render(<DocumentPreviewPanel {...panelProps(html)} />)
+    const htmlView = render(<DocumentPreviewPanel {...panelProps(html, HTML_ADDRESS)} />)
     expect(htmlView.getByText('grant failed')).toBeTruthy()
     fireEvent.click(htmlView.getByText(en['interactive.enable']))
     expect(htmlView.getByText(en['interactive.confirm.title'])).toBeTruthy()
@@ -217,7 +249,7 @@ describe('DocumentPreviewPanel', () => {
       startingInteractive: true,
       interactiveError: null,
     })
-    const startingView = render(<DocumentPreviewPanel {...panelProps(starting)} />)
+    const startingView = render(<DocumentPreviewPanel {...panelProps(starting, HTML_ADDRESS)} />)
     expect((startingView.getByText(en['interactive.enable']) as HTMLButtonElement).disabled).toBe(true)
     startingView.unmount()
 
@@ -251,7 +283,7 @@ describe('DocumentPreviewPanel', () => {
       startingInteractive: false,
       interactiveError: null,
     })
-    const interactiveView = render(<DocumentPreviewPanel {...panelProps(interactive)} />)
+    const interactiveView = render(<DocumentPreviewPanel {...panelProps(interactive, HTML_ADDRESS)} />)
     const frame = interactiveView.container.querySelector('iframe')
     expect(frame?.getAttribute('sandbox')).toBe('allow-scripts allow-same-origin')
     expect(frame?.getAttribute('src')).toBe('http://abc.localhost:1')

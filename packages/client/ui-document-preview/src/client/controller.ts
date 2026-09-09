@@ -3,13 +3,9 @@
  * superseded requests, revokes image object URLs, and owns interactive grants.
  */
 
-import type {
-  InteractivePreviewGrant, InteractivePreviewId, SessionId,
-} from '@deepseek-ai/dsh-client-runtime/client'
-import {
-  createSnapshotStore, InteractivePreviewError, PreviewReadError, type SnapshotStore,
-} from '@deepseek-ai/dsh-client-runtime/client'
-import type { LayoutPanelId } from '@deepseek-ai/dsh-client-ui-layout/client'
+import { createSnapshotStore, type SnapshotStore } from '@deepseek-ai/dsh-client-store'
+import type { InteractivePreviewGrant, InteractivePreviewId } from '@deepseek-ai/dsh-host-interactive-preview/types'
+import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import { replaceHtmlMermaid, sanitizePreviewHtml, wrapPreviewSrcdoc } from './html.ts'
 import { previewMermaidRenderer } from './mermaid.ts'
 import {
@@ -18,10 +14,7 @@ import {
   rewriteHtmlImageSources,
 } from './resources.ts'
 
-/** Secondary-panel id owned by this plugin. */
-export const DOCUMENT_PREVIEW_PANEL_ID = 'document-preview' as LayoutPanelId
-
-/** Per-session preview snapshot the panel renders. */
+/** Per-session preview snapshot the tab body renders. */
 export interface DocumentPreviewView {
   status: 'idle' | 'loading' | 'ready' | 'error'
   path: string | null
@@ -50,7 +43,7 @@ const IDLE: DocumentPreviewView = {
   interactiveError: null,
 }
 
-/** Host and layout seams the controller calls. */
+/** Host remotes the controller calls. */
 export interface DocumentPreviewHost {
   readPreviewDocument: (
     sessionId: SessionId,
@@ -72,14 +65,12 @@ export interface DocumentPreviewHost {
   stopInteractivePreview: (id: InteractivePreviewId, signal?: AbortSignal) => Promise<void>
   parentOrigin: string
   openPath: (path: string) => Promise<void>
-  openPanel: (id: typeof DOCUMENT_PREVIEW_PANEL_ID) => void
-  closePanel: (id: typeof DOCUMENT_PREVIEW_PANEL_ID) => void
 }
 
-/** Outward preview face other plugins call to open Markdown or HTML files. */
+/** Outward preview face the tab body calls to load Markdown or HTML files. */
 export interface IDocumentPreview {
   /**
-   * Open a previewable document beside chat for one session.
+   * Load a previewable document for one session.
    * @param sessionId - Session whose cwd confines the read.
    * @param path - Workspace document path.
    */
@@ -90,7 +81,7 @@ export interface IDocumentPreview {
    */
   reload(sessionId: SessionId): void
   /**
-   * Close the preview panel for one session and drop its UI state.
+   * Stop grants and drop preview state for one session.
    * @param sessionId - Session whose preview should close.
    */
   close(sessionId: SessionId): void
@@ -106,7 +97,7 @@ export interface IDocumentPreview {
   enableInteractive(sessionId: SessionId): void
   /**
    * Observable preview snapshot for one session.
-   * @param sessionId - Session whose panel is rendering.
+   * @param sessionId - Session whose tab is rendering.
    * @returns Stable per-session store identity.
    */
   state(sessionId: SessionId): SnapshotStore<DocumentPreviewView>
@@ -116,7 +107,7 @@ export interface IDocumentPreview {
 
 /**
  * Session-scoped preview loader.
- * @param host - Confined reads, native open, grants, and panel open/close.
+ * @param host - Confined reads, native open, and grants.
  */
 export class DocumentPreviewController implements IDocumentPreview {
   private readonly stores = new Map<string, SnapshotStore<DocumentPreviewView>>()
@@ -129,12 +120,11 @@ export class DocumentPreviewController implements IDocumentPreview {
   constructor(private readonly host: DocumentPreviewHost) {}
 
   /**
-   * Open a previewable document beside chat for one session.
+   * Load a previewable document for one session.
    * @param sessionId - Session whose cwd confines the read.
    * @param path - Workspace document path.
    */
   open(sessionId: SessionId, path: string): void {
-    this.host.openPanel(DOCUMENT_PREVIEW_PANEL_ID)
     void this.load(sessionId, path)
   }
 
@@ -149,7 +139,7 @@ export class DocumentPreviewController implements IDocumentPreview {
   }
 
   /**
-   * Close the preview panel for one session and drop its UI state.
+   * Stop grants and drop preview state for one session.
    * @param sessionId - Session whose preview should close.
    */
   close(sessionId: SessionId): void {
@@ -158,7 +148,6 @@ export class DocumentPreviewController implements IDocumentPreview {
     this.authorized.delete(sessionId as string)
     void this.stopGrant(sessionId)
     this.state(sessionId).set(IDLE)
-    this.host.closePanel(DOCUMENT_PREVIEW_PANEL_ID)
   }
 
   /**
@@ -186,7 +175,7 @@ export class DocumentPreviewController implements IDocumentPreview {
 
   /**
    * Observable preview snapshot for one session.
-   * @param sessionId - Session whose panel is rendering.
+   * @param sessionId - Session whose tab is rendering.
    * @returns Stable per-session store identity.
    */
   state(sessionId: SessionId): SnapshotStore<DocumentPreviewView> {
@@ -402,11 +391,13 @@ export class DocumentPreviewController implements IDocumentPreview {
 }
 
 function messageOf(error: unknown): string {
-  if (error instanceof PreviewReadError) return error.rpcError.message
+  if (typeof error === 'object' && error !== null) {
+    const record = error as { message?: unknown; code?: unknown }
+    if (typeof record.message === 'string') return record.message
+  }
   return error instanceof Error ? error.message : String(error)
 }
 
 function interactiveMessageOf(error: unknown): string {
-  if (error instanceof InteractivePreviewError) return error.rpcError.message
-  return error instanceof Error ? error.message : String(error)
+  return messageOf(error)
 }

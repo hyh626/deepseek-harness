@@ -12,9 +12,12 @@ import type { IncomingMessage, Server, ServerResponse } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { basename, dirname, extname } from 'node:path'
 import { Context, Service } from '@deepseek-ai/cordis'
+import type { Agent } from '@deepseek-ai/dsh-agent'
 import { FsError, type FsTarget } from '@deepseek-ai/dsh-fs'
 import type { Session, SessionId } from '@deepseek-ai/dsh-session'
+import { Remote, RemoteError, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
 import z from '@deepseek-ai/schemastery'
+import type {} from 'zod'
 import mime from 'mime-types'
 import {
   hostAuthority,
@@ -73,6 +76,46 @@ export const DEFAULT_MAX_ASSET_BYTES = 10 * 1024 * 1024
 /** Default inactivity limit: 30 minutes. */
 export const DEFAULT_INACTIVITY_TIMEOUT_MS = 30 * 60 * 1000
 
+const REMOTE_CODES = {
+  'preview-session-not-found': 'interactive-preview/session-not-found',
+  'preview-session-no-cwd': 'interactive-preview/session-no-cwd',
+  'preview-entry-not-found': 'interactive-preview/entry-not-found',
+  'preview-entry-not-file': 'interactive-preview/entry-not-file',
+  'preview-entry-not-html': 'interactive-preview/entry-not-html',
+  'preview-outside-workspace': 'interactive-preview/outside-workspace',
+  'preview-invalid-parent-origin': 'interactive-preview/invalid-parent-origin',
+  'preview-max-grants': 'interactive-preview/max-grants',
+  'preview-disposed': 'interactive-preview/disposed',
+} as const
+
+function throwRemote(error: unknown, context: {
+  sessionId?: SessionId
+  path?: string
+  parentOrigin?: string
+}): never {
+  if (error instanceof InteractivePreviewError) {
+    const code = REMOTE_CODES[error.code]
+    switch (error.code) {
+      case 'preview-session-not-found':
+      case 'preview-session-no-cwd':
+        throw new RemoteError(code, error.message, { sessionId: context.sessionId ?? '' })
+      case 'preview-entry-not-found':
+      case 'preview-entry-not-file':
+      case 'preview-entry-not-html':
+      case 'preview-outside-workspace':
+        throw new RemoteError(code, error.message, { path: context.path ?? '' })
+      case 'preview-invalid-parent-origin':
+        throw new RemoteError(code, error.message, { parentOrigin: context.parentOrigin ?? '' })
+      case 'preview-max-grants':
+      case 'preview-disposed':
+        throw new RemoteError(code, error.message, {})
+      default:
+        throw error
+    }
+  }
+  throw error
+}
+
 declare module '@deepseek-ai/cordis' {
   interface Context {
     interactivePreview: InteractivePreview
@@ -110,7 +153,7 @@ function assertNever(value: never): never {
 /**
  * Mint ephemeral capability-hostname preview origins backed by session workspace files.
  */
-export default class InteractivePreview extends Service {
+export default class InteractivePreview extends TypertRemoteService {
   static inject = inject
   static Config: z<Config> = z.object({
     bindHost: z.union([z.const('127.0.0.1'), z.const('0.0.0.0')]).default(DEFAULT_BIND_HOST),
@@ -331,6 +374,40 @@ export default class InteractivePreview extends Service {
     const grant = this.grants.get(id)
     if (grant === undefined) return
     await this.shutdownGrant(grant)
+  }
+
+  /**
+   * Mint a unique-origin grant for one session HTML entry.
+   * @param agent - session whose workspace confines the entry.
+   * @param path - HTML entry path relative to the session cwd unless absolute.
+   * @param parentOrigin - trusted parent origin embedded in CSP `frame-ancestors`.
+   * @param signal - caller cancellation.
+   * @returns the grant id and complete HTTP origin.
+   */
+  @Remote('start')
+  async remoteExportStart(
+    agent: Agent,
+    path: string,
+    parentOrigin: string,
+    signal: AbortSignal,
+  ): Promise<InteractivePreviewGrant> {
+    signal.throwIfAborted()
+    try {
+      return await this.open({ sessionId: agent.id, path, parentOrigin })
+    } catch (error: unknown) {
+      throwRemote(error, { sessionId: agent.id, path, parentOrigin })
+    }
+  }
+
+  /**
+   * Close one preview grant. Missing ids are a no-op.
+   * @param id - grant returned from {@link InteractivePreview.remoteExportStart}.
+   * @param signal - caller cancellation.
+   */
+  @Remote('stop')
+  async remoteExportStop(id: InteractivePreviewId, signal: AbortSignal): Promise<void> {
+    signal.throwIfAborted()
+    await this.close(id)
   }
 
   private async closeGrantsForSession(sessionId: SessionId): Promise<void> {

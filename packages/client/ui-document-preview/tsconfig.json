@@ -9,28 +9,43 @@
   ],
   "references": [
     {
-      "path": "../locale"
-    },
-    {
       "path": "../../../vendor/cordis"
     },
     {
-      "path": "../ui-slots"
+      "path": "../../api/remotes/tsconfig.client.json"
+    },
+    {
+      "path": "../../core/session"
+    },
+    {
+      "path": "../locale"
+    },
+    {
+      "path": "../store"
     },
     {
       "path": "../ui-primitives"
     },
     {
-      "path": "../ui-layout"
+      "path": "../ui-renderer"
     },
     {
-      "path": "../ui-conversation"
+      "path": "../ui-session"
     },
     {
-      "path": "../runtime"
+      "path": "../ui-sidebar-right"
     },
     {
-      "path": "../../runtime-diagnostics/invariants"
+      "path": "../ui-slots"
+    },
+    {
+      "path": "../../api/workspace-files/tsconfig.client.json"
+    },
+    {
+      "path": "../../util/workspace-path"
+    },
+    {
+      "path": "../../host/interactive-preview"
     }
   ]
 }

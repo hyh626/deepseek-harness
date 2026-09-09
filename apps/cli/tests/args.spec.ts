@@ -36,8 +36,8 @@ describe('parseDshArgs', () => {
       .toEqual({ mode: 'profile', profile: 'tui', patches: [], args: ['--resume', 'abc'] })
     expect(parse(['--profile', 'web', '-h']))
       .toEqual({ mode: 'profile', profile: 'web', patches: [], args: ['-h'] })
-    expect(parse(['web', '--host', '127.0.0.1', '--port', '8080', '--dev']))
-      .toEqual({ mode: 'profile', profile: 'web', patches: [], args: ['--host', '127.0.0.1', '--port', '8080', '--dev'] })
+    expect(parse(['web', '--host', '127.0.0.1', '--port', '8080', '--no-open', '--future-web-flag']))
+      .toEqual({ mode: 'profile', profile: 'web', patches: [], args: ['--host', '127.0.0.1', '--port', '8080', '--no-open', '--future-web-flag'] })
     expect(parse(['--profile', 'headless', 'run', 'the', 'tests']))
       .toEqual({ mode: 'profile', profile: 'headless', patches: [], args: ['run', 'the', 'tests'] })
     // Launcher flags placed after that boundary belong to the app too.
@@ -95,6 +95,12 @@ describe('parseDshArgs', () => {
     expect(exitCode(['plugin', 'add', 'x'])).toBe(1) // --profile required
     expect(exitCode(['plugin', '--profile', 'tui'])).toBe(1) // nothing to forward
     expect(exitCode(['plugin', '--profile', ''])).toBe(1)
+    expect(exitCode(['--profile', 'desktop'])).toBe(1)
+    expect(exitCode(['--profile', 'Desktop'])).toBe(1)
+    expect(exitCode(['--profile', 'DESKTOP'])).toBe(1)
+    expect(exitCode(['--profile', 'desktop', '--dump-config'])).toBe(1)
+    expect(exitCode(['plugin', '--profile', 'desktop', 'add', 'x'])).toBe(1)
+    expect(exitCode(['plugin', '--profile', 'Desktop', 'add', 'x'])).toBe(1)
     expect(exitCode(['--profile', 'x', 'plugin', 'add', 'y'])).toBe(1)
   })
 

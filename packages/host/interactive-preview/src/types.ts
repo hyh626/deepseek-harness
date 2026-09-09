@@ -5,6 +5,7 @@
 
 import type { Branded } from '@deepseek-ai/dsh-brand'
 import type { SessionId } from '@deepseek-ai/dsh-session'
+import type {} from '@deepseek-ai/dsh-typert-protocol'
 
 /** Opaque interactive preview grant id. */
 export type InteractivePreviewId = Branded<'InteractivePreviewId'>
@@ -48,7 +49,30 @@ export type InteractivePreviewErrorCode =
   | 'preview-max-grants'
   | 'preview-disposed'
 
-/** Typed interactive-preview failure for callers and HTTP mapping. */
+declare module '@deepseek-ai/dsh-typert-protocol' {
+  interface RemoteErrorDetailsMap {
+    /** No live session matches the addressed id. */
+    'interactive-preview/session-not-found': { readonly sessionId: string }
+    /** The session has no cwd, so workspace resolution cannot start. */
+    'interactive-preview/session-no-cwd': { readonly sessionId: string }
+    /** The HTML entry path does not exist inside the workspace. */
+    'interactive-preview/entry-not-found': { readonly path: string }
+    /** The HTML entry path is not a regular file. */
+    'interactive-preview/entry-not-file': { readonly path: string }
+    /** The entry is not an HTML file. */
+    'interactive-preview/entry-not-html': { readonly path: string }
+    /** The entry resolves outside the session workspace. */
+    'interactive-preview/outside-workspace': { readonly path: string }
+    /** `parentOrigin` is not an exact `http:`/`https:` origin. */
+    'interactive-preview/invalid-parent-origin': { readonly parentOrigin: string }
+    /** The configured concurrent grant cap is already reached. */
+    'interactive-preview/max-grants': Record<string, never>
+    /** The plugin fiber has disposed. */
+    'interactive-preview/disposed': Record<string, never>
+  }
+}
+
+/** Typed interactive-preview failure for in-process callers. */
 export class InteractivePreviewError extends Error {
   /** Stable failure code. */
   readonly code: InteractivePreviewErrorCode

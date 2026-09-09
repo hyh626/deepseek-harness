@@ -3,7 +3,6 @@
   flex-direction: column;
   height: 100%;
   min-width: 0;
-  border-left: 1px solid var(--dsw-alias-border-l2);
   background: var(--dsw-alias-bg-base);
 }
 
@@ -31,23 +30,6 @@
   flex: none;
   align-items: center;
   gap: 4px;
-}
-
-.close {
-  display: grid;
-  flex: none;
-  place-items: center;
-  width: 28px;
-  height: 28px;
-  border: none;
-  border-radius: 999px;
-  background: transparent;
-  color: var(--dsw-alias-label-secondary);
-  cursor: pointer;
-}
-
-.close:hover {
-  background: var(--dsw-alias-interactive-bg-hover);
 }
 
 .body {

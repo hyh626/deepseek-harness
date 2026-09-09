@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { collectHtmlImageSources, isPreviewableDocumentPath, isPreviewableImageSource, previewBasename, rewriteHtmlImageSources } from '../src/client/resources.ts'
+import { collectHtmlImageSources, isPreviewableDocumentPath, isPreviewableImageSource, previewBasename, previewDocumentFormat, resolvePreviewImagePath, rewriteHtmlImageSources } from '../src/client/resources.ts'
 
 describe('previewable path gates', () => {
   it('accepts markdown and html extensions without regard to case', () => {
@@ -25,5 +25,20 @@ describe('previewable path gates', () => {
     const html = '<img src="docs/shot.png"><img src="docs/shot.png"><img src="skip.svg">'
     expect(collectHtmlImageSources(html)).toEqual(['docs/shot.png'])
     expect(rewriteHtmlImageSources(html, new Map())).toBe(html)
+  })
+
+  it('infers markdown and html formats from the extension', () => {
+    expect(previewDocumentFormat('NOTES.MD')).toBe('markdown')
+    expect(previewDocumentFormat('a.markdown')).toBe('markdown')
+    expect(previewDocumentFormat('Index.HTML')).toBe('html')
+    expect(previewDocumentFormat('page.htm')).toBe('html')
+    expect(previewDocumentFormat('src/a.ts')).toBeUndefined()
+  })
+
+  it('resolves relative image sources against the document directory', () => {
+    expect(resolvePreviewImagePath('/w/page.html', './dot.png')).toBe('/w/dot.png')
+    expect(resolvePreviewImagePath('work/notes.md', 'docs/shot.png')).toBe('work/docs/shot.png')
+    expect(resolvePreviewImagePath('C:/w/page.html', '../img/a.png')).toBe('C:/img/a.png')
+    expect(resolvePreviewImagePath('/w/page.html', '/abs/x.png')).toBe('/abs/x.png')
   })
 })

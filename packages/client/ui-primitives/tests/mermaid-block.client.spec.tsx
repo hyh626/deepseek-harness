@@ -3,6 +3,7 @@ import { cleanup, render, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { MarkdownText } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { MermaidRenderer } from '@deepseek-ai/dsh-client-ui-primitives'
+import { markdownLabels } from './labels.client.ts'
 
 afterEach(cleanup)
 
@@ -49,7 +50,7 @@ describe('MarkdownText mermaid opt-in', () => {
   })
 
   it('keeps a mermaid fence as a generic code block when no renderer is supplied', () => {
-    const { container } = render(<MarkdownText text={MERMAID_SOURCE} />)
+    const { container } = render(<MarkdownText text={MERMAID_SOURCE} labels={markdownLabels} />)
     expect(container.querySelector('img')).toBeNull()
     expect(container.querySelector('.md-code-block')).not.toBeNull()
     expect(container.textContent).toContain('graph TD')
@@ -59,7 +60,7 @@ describe('MarkdownText mermaid opt-in', () => {
   it('does not render mermaid diagrams while the message is still streaming', () => {
     const renderMermaid = vi.fn(() => Promise.resolve('<svg></svg>'))
     const renderer: MermaidRenderer = { render: renderMermaid }
-    const { container } = render(<MarkdownText text={MERMAID_SOURCE} streaming mermaid={renderer} />)
+    const { container } = render(<MarkdownText text={MERMAID_SOURCE} labels={markdownLabels} streaming mermaid={renderer} />)
     expect(renderMermaid).not.toHaveBeenCalled()
     expect(container.querySelector('img')).toBeNull()
     expect(container.textContent).toContain('graph TD')
@@ -70,7 +71,7 @@ describe('MarkdownText mermaid opt-in', () => {
     const renderer: MermaidRenderer = {
       render: renderMermaid,
     }
-    const { container } = render(<MarkdownText text={MERMAID_SOURCE} mermaid={renderer} />)
+    const { container } = render(<MarkdownText text={MERMAID_SOURCE} labels={markdownLabels} mermaid={renderer} />)
     expect(renderMermaid).toHaveBeenCalledTimes(1)
     expect(renderMermaid).toHaveBeenCalledWith('graph TD\n  A --> B', expect.any(AbortSignal))
     const image = await waitFor(() => {
@@ -94,8 +95,8 @@ describe('MarkdownText mermaid opt-in', () => {
         return next.promise
       },
     }
-    const view = render(<MarkdownText text={MERMAID_SOURCE} mermaid={renderer} />)
-    view.rerender(<MarkdownText text={'```mermaid\ngraph LR\n  X --> Y\n```'} mermaid={renderer} />)
+    const view = render(<MarkdownText text={MERMAID_SOURCE} labels={markdownLabels} mermaid={renderer} />)
+    view.rerender(<MarkdownText text={'```mermaid\ngraph LR\n  X --> Y\n```'} labels={markdownLabels} mermaid={renderer} />)
     first.resolve('<svg id="stale"></svg>')
     await Promise.resolve()
     expect(view.container.querySelector('img')).toBeNull()
@@ -112,7 +113,7 @@ describe('MarkdownText mermaid opt-in', () => {
   it('drops a stale render error after unmount', async () => {
     const pending = deferred<string>()
     const renderer: MermaidRenderer = { render: () => pending.promise }
-    const view = render(<MarkdownText text={MERMAID_SOURCE} mermaid={renderer} />)
+    const view = render(<MarkdownText text={MERMAID_SOURCE} labels={markdownLabels} mermaid={renderer} />)
     view.unmount()
     pending.reject(new Error('stale'))
     await Promise.resolve()
@@ -123,7 +124,7 @@ describe('MarkdownText mermaid opt-in', () => {
       render: () => Promise.reject(new Error('parse failed')),
     }
     const { container } = render(
-      <MarkdownText text={MERMAID_SOURCE} mermaid={renderer} mermaidErrorLabel="diagram failed" />,
+      <MarkdownText text={MERMAID_SOURCE} labels={markdownLabels} mermaid={renderer} mermaidErrorLabel="diagram failed" />,
     )
     await waitFor(() => {
       expect(container.textContent).toContain('diagram failed')
@@ -137,7 +138,7 @@ describe('MarkdownText mermaid opt-in', () => {
     const renderer: MermaidRenderer = {
       render: () => Promise.resolve('<svg></svg>'),
     }
-    const view = render(<MarkdownText text={MERMAID_SOURCE} mermaid={renderer} />)
+    const view = render(<MarkdownText text={MERMAID_SOURCE} labels={markdownLabels} mermaid={renderer} />)
     await waitFor(() => {
       expect(view.container.querySelector('img')).not.toBeNull()
     })
@@ -149,6 +150,7 @@ describe('MarkdownText mermaid opt-in', () => {
     const { container } = render(
       <MarkdownText
         text={'![shot](docs/shot.png)'}
+        labels={markdownLabels}
         resolveImageSrc={url => url === 'docs/shot.png' ? 'blob:preview-shot' : undefined}
       />,
     )

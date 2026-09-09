@@ -39,6 +39,58 @@ export function isPreviewableDocumentPath(path: string): boolean {
 }
 
 /**
+ * Preview format inferred from a document path's extension.
+ * @param path - Workspace document path.
+ * @returns `markdown` or `html` for a previewable extension; otherwise `undefined`.
+ */
+export function previewDocumentFormat(path: string): 'markdown' | 'html' | undefined {
+  const extension = previewExtension(path)
+  if (extension === '.md' || extension === '.markdown') return 'markdown'
+  if (extension === '.html' || extension === '.htm') return 'html'
+  return undefined
+}
+
+/**
+ * Resolve a relative image source against the document's directory.
+ *
+ * Separators become `/`. `.` and empty segments are dropped; `..` pops one
+ * directory and is dropped at the root. An absolute POSIX or Windows source is
+ * returned as itself after that normalization. The Host still confines the
+ * resulting path to the session workspace.
+ * @param documentPath - Path of the document that authored the source.
+ * @param source - Relative image destination from Markdown or HTML.
+ * @returns The path to hand `workspaceFiles.readBytes`.
+ */
+export function resolvePreviewImagePath(documentPath: string, source: string): string {
+  const relative = source.trim().replace(/\\/g, '/')
+  if (relative.startsWith('/') || /^[A-Za-z]:/.test(relative)) return normalizePosixPath(relative)
+  const base = documentPath.replace(/\\/g, '/')
+  const slash = base.lastIndexOf('/')
+  const dir = slash === -1 ? '' : base.slice(0, slash)
+  return normalizePosixPath(dir === '' ? relative : `${dir}/${relative}`)
+}
+
+function normalizePosixPath(path: string): string {
+  const drive = path.match(/^([A-Za-z]:)(\/.*)?$/)
+  const rest = drive !== null
+    ? (drive[2] ?? '').replace(/^\//, '')
+    : path.startsWith('/') ? path.slice(1) : path
+  const parts: string[] = []
+  for (const segment of rest.split('/')) {
+    if (segment === '' || segment === '.') continue
+    if (segment === '..') {
+      parts.pop()
+      continue
+    }
+    parts.push(segment)
+  }
+  const body = parts.join('/')
+  if (drive !== null) return body === '' ? `${drive[1]}/` : `${drive[1]}/${body}`
+  if (path.startsWith('/')) return `/${body}`
+  return body
+}
+
+/**
  * Whether an image source may be loaded as a preview raster.
  * @param source - Image destination from Markdown or HTML.
  * @returns True for relative PNG/JPEG/WebP/GIF paths.

@@ -1,18 +1,25 @@
 /** Test-owned workspaces face: the renderer standard-kit observable plus recorded actions. */
-import { createSnapshotStore } from '@deepseek-ai/dsh-client-runtime/client'
+import { createSnapshotStore } from '@deepseek-ai/dsh-client-store'
 import type {
-  DirectoryListing,
-  InteractivePreviewGrant,
-  InteractivePreviewId,
-  IWorkspaces,
-  SessionId,
-  SnapshotStore,
-  WorkspaceId,
-  WorkspaceListState,
-  WorkspaceView,
-} from '@deepseek-ai/dsh-client-runtime/client'
-import { workspaceListState } from './fixtures.ts'
-import type { Stabilizer } from './fixtures.ts'
+  IWorkspaces, WorkspaceId, WorkspaceSnapshot, WorkspaceView,
+} from '@deepseek-ai/dsh-api-workspace-controller/client'
+import type { SessionId } from '@deepseek-ai/dsh-session/types'
+import type { SnapshotStore } from '@deepseek-ai/dsh-client-store'
+import { workspaceSnapshot } from './fixtures.ts'
+import type { FixtureSnapshot, Stabilizer } from './fixtures.ts'
+
+/** Writable test representation of the immutable Workspace Controller snapshot. */
+type WorkspaceFixtureSnapshot = FixtureSnapshot<WorkspaceSnapshot>
+
+/** Callable command names on the production Workspace Controller face. */
+type WorkspaceAction = {
+  [Key in keyof IWorkspaces]: IWorkspaces[Key] extends (...args: never[]) => unknown ? Key : never
+}[keyof IWorkspaces]
+
+/** Test replacement retaining one Controller command's parameters and result. */
+type WorkspaceStub<Key extends WorkspaceAction> = (
+  ...args: Parameters<IWorkspaces[Key]>
+) => ReturnType<IWorkspaces[Key]>
 
 /**
  * Workspaces test double. Implements the same IWorkspaces face features
@@ -23,59 +30,36 @@ import type { Stabilizer } from './fixtures.ts'
  */
 export class TestWorkspaces implements IWorkspaces {
   /** The useWorkspaces standard feed. */
-  readonly list: SnapshotStore<WorkspaceListState>
+  readonly list: SnapshotStore<WorkspaceFixtureSnapshot>
 
   /** Calls observed on the action face, newest last. */
   readonly calls: { method: string; args: unknown[] }[] = []
 
   /** Replaceable action seat: feature tests may stub richer behavior. */
-  private readonly stubs = new Map<string, (...args: unknown[]) => unknown>()
+  private readonly stubs = new Map<WorkspaceAction, (...args: unknown[]) => unknown>()
 
   /**
    * @param stabilize - the owning runtime's act wrapper.
    */
   constructor(private readonly stabilize: Stabilizer) {
-    this.list = createSnapshotStore<WorkspaceListState>(workspaceListState())
+    this.list = createSnapshotStore<WorkspaceFixtureSnapshot>({ ...workspaceSnapshot() })
   }
 
   /**
    * Update the workspace list state through an immer draft.
    * @param mutate - draft mutator.
    */
-  async update(mutate: (draft: WorkspaceListState) => void): Promise<void> {
+  async update(mutate: (draft: WorkspaceFixtureSnapshot) => void): Promise<void> {
     await this.stabilize(() => { this.list.update(mutate) })
   }
 
   /**
    * Replace an action's behavior (the recorded call is still appended first).
-   * @param method - action name (e.g. 'connectWorkspace').
+   * @param method - Controller action name (e.g. 'create').
    * @param impl - replacement behavior.
    */
-  stub(method: string, impl: (...args: unknown[]) => unknown): void {
-    this.stubs.set(method, impl)
-  }
-
-  /**
-   * Connect a workspace to its reusable/new blank session (recorded). The
-   * default resolves the workspace id back as the session id; stub for
-   * cross-session flows.
-   * @param workspaceId - target workspace.
-   * @returns the connected session id.
-   */
-  async connectWorkspace(workspaceId: WorkspaceId): Promise<SessionId> {
-    this.calls.push({ method: 'connectWorkspace', args: [workspaceId] })
-    const stub = this.stubs.get('connectWorkspace')
-    if (stub !== undefined) return await (stub(workspaceId) as Promise<SessionId>)
-    return `session-of-${workspaceId}` as SessionId
-  }
-
-  /**
-   * New-session flow (recorded; stubbed behavior runs when installed).
-   * @param workspaceId - optional explicit workspace target.
-   */
-  startSession(workspaceId?: WorkspaceId): void {
-    this.calls.push({ method: 'startSession', args: [workspaceId] })
-    this.stubs.get('startSession')?.(workspaceId)
+  stub<Key extends WorkspaceAction>(method: Key, impl: WorkspaceStub<Key>): void {
+    this.stubs.set(method, impl as (...args: unknown[]) => unknown)
   }
 
   /**
@@ -94,139 +78,6 @@ export class TestWorkspaces implements IWorkspaces {
       path: input.path,
       sessionIds: [],
     } as unknown as WorkspaceView
-  }
-
-  /**
-   * Open a path with the host OS default application (recorded; default no-op).
-   * @param path - host-resolvable path.
-   */
-  async openPath(path: string): Promise<void> {
-    this.calls.push({ method: 'openPath', args: [path] })
-    await (this.stubs.get('openPath')?.(path) as Promise<void> | undefined)
-  }
-
-  /**
-   * Read one preview document (recorded). The default serves a minimal markdown doc.
-   * @param sessionId - addressed session.
-   * @param path - document path.
-   * @param signal - optional abort forwarded to stubs.
-   */
-  async readPreviewDocument(
-    sessionId: SessionId,
-    path: string,
-    signal?: AbortSignal,
-  ): Promise<{ path: string; format: 'markdown' | 'html'; content: string }> {
-    this.calls.push({ method: 'readPreviewDocument', args: [sessionId, path, signal] })
-    const stub = this.stubs.get('readPreviewDocument')
-    if (stub !== undefined) {
-      return await (stub(sessionId, path, signal) as Promise<{ path: string; format: 'markdown' | 'html'; content: string }>)
-    }
-    return { path, format: 'markdown', content: '# preview' }
-  }
-
-  /**
-   * Read one preview image (recorded). The default serves a minimal PNG payload.
-   * @param sessionId - addressed session.
-   * @param documentPath - preview document path used as the relative base.
-   * @param source - image source relative to the document directory unless absolute.
-   * @param signal - optional abort forwarded to stubs.
-   */
-  async readPreviewImage(
-    sessionId: SessionId,
-    documentPath: string,
-    source: string,
-    signal?: AbortSignal,
-  ): Promise<{ mediaType: 'image/png'; data: string }> {
-    this.calls.push({ method: 'readPreviewImage', args: [sessionId, documentPath, source, signal] })
-    const stub = this.stubs.get('readPreviewImage')
-    if (stub !== undefined) {
-      return await (stub(sessionId, documentPath, source, signal) as Promise<{ mediaType: 'image/png'; data: string }>)
-    }
-    return { mediaType: 'image/png', data: 'AA==' }
-  }
-
-  /**
-   * Start interactive preview (recorded). The default serves a minimal grant.
-   * @param sessionId - addressed session.
-   * @param path - entry HTML path.
-   * @param parentOrigin - trusted parent origin.
-   * @param signal - optional abort forwarded to stubs.
-   */
-  async startInteractivePreview(
-    sessionId: SessionId,
-    path: string,
-    parentOrigin: string,
-    signal?: AbortSignal,
-  ): Promise<InteractivePreviewGrant> {
-    this.calls.push({ method: 'startInteractivePreview', args: [sessionId, path, parentOrigin, signal] })
-    const stub = this.stubs.get('startInteractivePreview')
-    if (stub !== undefined) {
-      return await (stub(sessionId, path, parentOrigin, signal) as Promise<InteractivePreviewGrant>)
-    }
-    return { id: 'preview-grant' as InteractivePreviewId, origin: 'http://abc.localhost:1' }
-  }
-
-  /**
-   * Stop interactive preview (recorded; default no-op).
-   * @param id - grant to close.
-   * @param signal - optional abort forwarded to stubs.
-   */
-  async stopInteractivePreview(id: InteractivePreviewId, signal?: AbortSignal): Promise<void> {
-    this.calls.push({ method: 'stopInteractivePreview', args: [id, signal] })
-    await (this.stubs.get('stopInteractivePreview')?.(id, signal) as Promise<void> | undefined)
-  }
-
-  /**
-   * Directory picker (recorded). The default cancels (null); stub to select.
-   * @returns the picked path, or null.
-   */
-  async pickDirectory(): Promise<string | null> {
-    this.calls.push({ method: 'pickDirectory', args: [] })
-    const stub = this.stubs.get('pickDirectory')
-    if (stub !== undefined) return await (stub() as Promise<string | null>)
-    return null
-  }
-
-  /**
-   * Browse listing (recorded). The default serves an empty home level; stub
-   * to shape a tree.
-   * @param path - absolute directory to list; absent lists the home level.
-   * @returns the level's listing.
-   */
-  async listDirectory(path?: string, signal?: AbortSignal): Promise<DirectoryListing> {
-    // The signal is recorded and forwarded like the production face passes
-    // it to the wire, so cancellation integration tests can observe or
-    // reject on a superseded scan.
-    this.calls.push({ method: 'listDirectory', args: [path, signal] })
-    const stub = this.stubs.get('listDirectory')
-    if (stub !== undefined) return await (stub(path, signal) as Promise<DirectoryListing>)
-    // The chain runs root-to-target inclusive, per the DirectoryListing
-    // contract — a bare root crumb would mislabel the level in browsers
-    // driven by this double.
-    return {
-      path: '/home/test',
-      home: '/home/test',
-      crumbs: [
-        { name: '/', path: '/', hidden: false },
-        { name: 'home', path: '/home', hidden: false },
-        { name: 'test', path: '/home/test', hidden: false },
-      ],
-      entries: [],
-      truncated: false,
-    }
-  }
-
-  /**
-   * Browse child creation (recorded). The default joins parent and name.
-   * @param path - absolute existing parent directory.
-   * @param name - single path segment.
-   * @returns the created directory's absolute path.
-   */
-  async createDirectory(path: string, name: string): Promise<string> {
-    this.calls.push({ method: 'createDirectory', args: [path, name] })
-    const stub = this.stubs.get('createDirectory')
-    if (stub !== undefined) return await (stub(path, name) as Promise<string>)
-    return `${path}/${name}`
   }
 
   /**

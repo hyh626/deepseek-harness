@@ -1,10 +1,9 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { InteractivePreviewId, SessionId } from '@deepseek-ai/dsh-client-runtime/client'
-import { InteractivePreviewError, PreviewReadError } from '@deepseek-ai/dsh-client-runtime/client'
+import type { InteractivePreviewId } from '@deepseek-ai/dsh-host-interactive-preview/types'
+import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import {
   DocumentPreviewController,
-  DOCUMENT_PREVIEW_PANEL_ID,
   type DocumentPreviewHost,
 } from '../src/client/controller.ts'
 import { previewMermaidRenderer } from '../src/client/mermaid.ts'
@@ -38,7 +37,6 @@ function deferred<T>(): {
 
 function host() {
   const opened: string[] = []
-  const panels: string[] = []
   const readPreviewDocument = vi.fn<DocumentPreviewHost['readPreviewDocument']>(
     async () => ({ path: '/w/notes.md', format: 'markdown', content: '# Hi' }),
   )
@@ -53,24 +51,20 @@ function host() {
   )
   return {
     opened,
-    panels,
     readPreviewDocument,
     readPreviewImage,
     startInteractivePreview,
     stopInteractivePreview,
     parentOrigin: 'http://127.0.0.1:3000',
     openPath: vi.fn(async (path: string) => { opened.push(path) }),
-    openPanel: vi.fn((id: typeof DOCUMENT_PREVIEW_PANEL_ID) => { panels.push(`open:${id}`) }),
-    closePanel: vi.fn((id: typeof DOCUMENT_PREVIEW_PANEL_ID) => { panels.push(`close:${id}`) }),
   }
 }
 
 describe('DocumentPreviewController', () => {
-  it('loads a document, opens the panel, and records ready state', async () => {
+  it('loads a document and records ready state', async () => {
     const deps = host()
     const preview = new DocumentPreviewController(deps)
     preview.open(sid('s1'), 'notes.md')
-    expect(deps.openPanel).toHaveBeenCalledWith(DOCUMENT_PREVIEW_PANEL_ID)
     expect(preview.state(sid('s1')).getSnapshot().status).toBe('loading')
     await vi.waitFor(() => {
       expect(preview.state(sid('s1')).getSnapshot()).toMatchObject({
@@ -107,11 +101,9 @@ describe('DocumentPreviewController', () => {
   it('records a host business error without throwing', async () => {
     const deps = host()
     deps.readPreviewDocument = vi.fn(async () => {
-      throw new PreviewReadError({
-        code: 'preview-outside-workspace',
-        message: 'outside',
-        details: { path: '../x.md' },
-      })
+      const error = new Error('outside')
+      Object.assign(error, { code: 'workspace-file/outside-workspace' })
+      throw error
     })
     const preview = new DocumentPreviewController(deps)
     preview.open(sid('s1'), '../x.md')
@@ -136,7 +128,6 @@ describe('DocumentPreviewController', () => {
       expect(preview.state(sid('s1')).getSnapshot().status).toBe('ready')
     })
     preview.close(sid('s1'))
-    expect(deps.closePanel).toHaveBeenCalledWith(DOCUMENT_PREVIEW_PANEL_ID)
     expect(preview.state(sid('s1')).getSnapshot().status).toBe('idle')
   })
 
@@ -281,9 +272,9 @@ describe('DocumentPreviewController', () => {
 
     deps.stopInteractivePreview = vi.fn(async () => { throw new Error('already closed') })
     deps.startInteractivePreview = vi.fn(async () => {
-      throw new InteractivePreviewError({
-        code: 'preview-unavailable', message: 'no provider', details: {},
-      })
+      const error = new Error('no provider')
+      Object.assign(error, { code: 'interactive-preview/entry-not-html' })
+      throw error
     })
     preview.close(sid('s1'))
     preview.open(sid('s1'), 'page.html')

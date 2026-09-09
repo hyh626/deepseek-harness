@@ -1,11 +1,12 @@
 /**
- * Secondary-panel occupant for workspace Markdown and static HTML preview.
+ * Right-Sidebar tab body for workspace Markdown and static HTML preview.
  */
 
-import { useCallback, useMemo, useState, useSyncExternalStore } from 'react'
-import { Button, MarkdownText, RiskConfirmation } from '@deepseek-ai/dsh-client-ui-primitives'
+import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react'
+import { Button, MarkdownText, RiskConfirmation, type MarkdownLabels } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type { IDocumentPreview } from './controller.ts'
+import { hostFileOf } from './rpc.ts'
 import { previewBasename } from './resources.ts'
 import { previewMermaidRenderer } from './mermaid.ts'
 import css from './DocumentPreviewPanel.module.css'
@@ -16,24 +17,38 @@ export interface DocumentPreviewInjected {
   preview: IDocumentPreview
 }
 
-/** Full panel props: session runtime share, injected controller, locale. */
+/** Full tab props: session runtime share, injected controller, locale. */
 export type DocumentPreviewSlotProps =
-  PropsRuntime<'secondaryPanel'> & DocumentPreviewInjected & PropsLocale<'documentPreview'>
+  PropsRuntime<'sidebar.right.pane.tab'> & DocumentPreviewInjected & PropsLocale<'documentPreview'>
 
 /**
- * Render the exclusive document-preview secondary panel.
- * @param props - Session id, preview controller, and localized copy.
+ * Render the document-preview tab body.
+ * @param props - Tab runtime, preview controller, and localized copy.
  */
 export function DocumentPreviewPanel({
-  sessionId, preview, t,
+  sessionId, preview, t, useTabInfo,
 }: DocumentPreviewSlotProps) {
-  const store = preview.state(sessionId)
+  const { tab } = useTabInfo()
+  const file = useMemo(() => hostFileOf(tab.contentId, sessionId), [tab.contentId, sessionId])
+  useEffect(() => {
+    preview.open(file.sessionId, file.path)
+    const { signal } = tab
+    const onAbort = (): void => { preview.close(file.sessionId) }
+    signal.addEventListener('abort', onAbort)
+    return () => { signal.removeEventListener('abort', onAbort) }
+  }, [file, preview, tab.signal])
+
+  const store = preview.state(file.sessionId)
   const view = useSyncExternalStore(
     listener => store.subscribe(listener),
     () => store.getSnapshot(),
   )
   const resolveImageSrc = useCallback((url: string) => view.imageUrls[url], [view.imageUrls])
   const mermaid = useMemo(() => previewMermaidRenderer, [])
+  const labels = useMemo((): MarkdownLabels => ({
+    code: { copyLabel: t('copy'), copiedLabel: t('copied') },
+    footnotes: t('markdown.footnotes'),
+  }), [t])
   const [confirming, setConfirming] = useState(false)
   const [acknowledged, setAcknowledged] = useState(false)
   const htmlReady = view.status === 'ready' && view.format === 'html'
@@ -63,7 +78,7 @@ export function DocumentPreviewPanel({
             variant="ghost"
             size="sm"
             disabled={view.path === null || view.status === 'loading'}
-            onClick={() => { preview.reload(sessionId) }}
+            onClick={() => { preview.reload(file.sessionId) }}
           >
             {t('reload')}
           </Button>
@@ -71,20 +86,10 @@ export function DocumentPreviewPanel({
             variant="ghost"
             size="sm"
             disabled={view.path === null}
-            onClick={() => { preview.openExternal(sessionId) }}
+            onClick={() => { preview.openExternal(file.sessionId) }}
           >
             {t('openExternal')}
           </Button>
-          <button
-            type="button"
-            className={css.close}
-            aria-label={t('close')}
-            onClick={() => { preview.close(sessionId) }}
-          >
-            <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden>
-              <path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-            </svg>
-          </button>
         </div>
       </div>
       <div className={css.body}>
@@ -95,6 +100,7 @@ export function DocumentPreviewPanel({
         {view.status === 'ready' && view.format === 'markdown' && view.content !== null && (
           <MarkdownText
             text={view.content}
+            labels={labels}
             mermaid={mermaid}
             mermaidErrorLabel={t('mermaidError')}
             resolveImageSrc={resolveImageSrc}
@@ -127,6 +133,7 @@ export function DocumentPreviewPanel({
         description={t('interactive.confirm.description')}
         acknowledgeLabel={t('interactive.confirm.acknowledge')}
         cancelLabel={t('interactive.confirm.cancel')}
+        closeLabel={t('close')}
         confirmLabel={t('interactive.confirm.enable')}
         acknowledged={acknowledged}
         onAcknowledgedChange={setAcknowledged}
@@ -137,7 +144,7 @@ export function DocumentPreviewPanel({
         onConfirm={() => {
           setConfirming(false)
           setAcknowledged(false)
-          preview.enableInteractive(sessionId)
+          preview.enableInteractive(file.sessionId)
         }}
       />
     </div>

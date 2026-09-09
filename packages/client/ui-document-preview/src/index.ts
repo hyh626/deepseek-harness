@@ -4,5 +4,5 @@
  * exports["./client"].
  */
 
-/** Host plugin body — no host-side behavior for the document preview plugin. */
+/** Host plugin body: the preview contributes nothing to the host tree. */
 export function apply(): void {}
