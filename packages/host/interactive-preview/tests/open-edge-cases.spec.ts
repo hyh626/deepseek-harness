@@ -351,13 +351,15 @@ describe('InteractivePreview session disposal during open', () => {
         return originalListen.apply(this, args as never)
       }
       const prefix = args.slice(0, -1)
-      return originalListen.call(
+      return originalListen.apply(
         this,
-        ...(prefix as [number, string]),
-        () => {
-          detach()
-          ;(callback as () => void)()
-        },
+        [
+          ...prefix,
+          () => {
+            detach()
+            ;(callback as () => void)()
+          },
+        ] as never,
       )
     })
     await expect(preview.open({

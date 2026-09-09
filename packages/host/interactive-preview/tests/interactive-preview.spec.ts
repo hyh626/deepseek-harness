@@ -586,13 +586,15 @@ describe('InteractivePreview remotes', () => {
         return originalListen.apply(this, args as never)
       }
       const prefix = args.slice(0, -1)
-      return originalListen.call(
+      return originalListen.apply(
         this,
-        ...(prefix as [number, string]),
-        () => {
-          abort.abort()
-          ;(callback as () => void)()
-        },
+        [
+          ...prefix,
+          () => {
+            abort.abort()
+            ;(callback as () => void)()
+          },
+        ] as never,
       )
     })
     await expect(preview.remoteExportStart(
