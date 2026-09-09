@@ -1,13 +1,14 @@
-// Web e2e: workspace Markdown/HTML preview beside chat. Cold-seeds a write
-// turn, materializes the files in the session cwd, then clicks produced-file
-// chips through the assembled open-file waterfall.
+// Web e2e: workspace Markdown/HTML preview in the right Sidebar. Cold-seeds a
+// write turn, materializes the files in the session cwd, then clicks produced
+// chips so the document tab type claims `.md`/`.html` and textpreview claims
+// `.txt`. Interactive HTML is opt-in per document after RiskConfirmation.
 import { writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { Browser, Page } from 'playwright'
 import { chromium } from 'playwright'
-import { afterAll, beforeAll, describe, expect, it, onTestFailed, vi } from 'vitest'
-import { CallId, createAssistantMessage, createToolResultMessage, createUserMessage } from '@deepseek-ai/dsh-llm'
+import { afterAll, beforeAll, describe, expect, it, onTestFailed } from 'vitest'
+import { ToolCallId, createAssistantMessage, createToolResultMessage, createUserMessage } from '@deepseek-ai/dsh-llm'
 import { SESSION_FORMAT_VERSION, Session, SessionId } from '@deepseek-ai/dsh-session'
 import type {} from '@deepseek-ai/dsh-session-title'
 import {
@@ -117,10 +118,11 @@ function previewFixture(): string {
   session.append('step/start', { turn: 1, step: 1 })
   const calls = produced.map((file, index) => ({
     ...file,
-    callId: CallId(`document-preview-${String(index)}`),
+    callId: ToolCallId(`document-preview-${String(index)}`),
     args: JSON.stringify({ file_path: file.path, content: file.content }),
   }))
   session.append('assistant/message', {
+    stream: [],
     turn: 1,
     step: 1,
     message: createAssistantMessage({
@@ -147,8 +149,10 @@ function previewFixture(): string {
       }),
     }, { surfaceOp: 'append', sourceEventSeqs: [source.seq] })
   }
+  session.append('step/end', { turn: 1, step: 1 })
   session.append('step/start', { turn: 1, step: 2 })
   session.append('assistant/message', {
+    stream: [],
     turn: 1,
     step: 2,
     message: createAssistantMessage({
@@ -162,9 +166,9 @@ function previewFixture(): string {
   return [
     JSON.stringify({
       type: 'session', version: SESSION_FORMAT_VERSION, id: '{{sessionId}}',
-      createdAt: 0, cwd: '{{cwd}}',
+      createdAt: 0, cwd: '{{cwd}}', isSeeded: false, delegationDepth: 0,
     }),
-    ...session.events.map(event => JSON.stringify({
+    ...session.snapshotEvents().map(event => JSON.stringify({
       ...event, time: eventTimeOrigin + event.seq * 1_000,
     })),
     '',
@@ -192,8 +196,9 @@ describe('web e2e: workspace document preview beside chat', () => {
     await writeFile(join(scaffold.workspaceCwd, 'dot.png'), PNG)
     browser = await chromium.launch()
     page = await newEnglishPage(browser)
+    await page.setViewportSize({ width: 1800, height: 900 })
     tripwire = watchConsole(page)
-    await page.goto(scaffold.baseUrl, { waitUntil: 'load' })
+    await page.goto(scaffold.authenticatedUrl, { waitUntil: 'load' })
     try {
       await page.waitForSelector('[class*="frame"]', { timeout: 30_000 })
     } catch (error: unknown) {
@@ -210,7 +215,7 @@ describe('web e2e: workspace document preview beside chat', () => {
     await scaffold?.close()
   })
 
-  it.skipIf(MODE === 'record')('previews markdown and html in the side panel and delegates text files', async () => {
+  it.skipIf(MODE === 'record')('previews markdown and html in the right Sidebar and delegates text files', async () => {
     onTestFailed(() => saveFailureShot(page, 'web-e2e-document-preview'))
     const groupRow = page.locator('[role="treeitem"]').first()
     await groupRow.waitFor({ timeout: 15_000 })
@@ -228,7 +233,6 @@ describe('web e2e: workspace document preview beside chat', () => {
     await panel.waitFor({ timeout: 15_000 })
     await expect.poll(() => panel.getByRole('heading', { name: 'Notes' }).count(), { timeout: 15_000 }).toBe(1)
     await expect.poll(() => panel.locator('img[src^="blob:"]').count(), { timeout: 20_000 }).toBeGreaterThan(0)
-    expect(await page.locator('[data-secondary-collapsed]').count()).toBe(0)
 
     await row.getByText('page.html', { exact: true }).click()
     const frame = panel.locator('iframe')
@@ -240,33 +244,20 @@ describe('web e2e: workspace document preview beside chat', () => {
     expect(await page.evaluate(() => (window as Window & { __previewScriptRan?: boolean }).__previewScriptRan)).toBeUndefined()
     expect(await panel.getByRole('heading', { name: 'Notes' }).count()).toBe(0)
 
-    const openPath = vi.spyOn(scaffold.ctx.apiProxy.host, 'openPath')
-      .mockImplementation(async (request, _signal) => ({
-        rpcId: request.rpcId,
-        result: { ok: true, value: { opened: true as const } },
-      }))
-    try {
-      const [response] = await Promise.all([
-        page.waitForResponse(response => new URL(response.url()).pathname === '/api/host.openPath'),
-        row.getByText('notes.txt', { exact: true }).click(),
-      ])
-      expect(response.status()).toBe(200)
-      expect(openPath).toHaveBeenCalledTimes(1)
-      expect(openPath.mock.calls[0]![0].payload).toEqual({ path: `${scaffold.workspaceCwd}/notes.txt` })
-    } finally {
-      openPath.mockRestore()
-    }
-
-    expect(await panel.locator('iframe').count()).toBe(1)
-
     const snapshot = (await captureStableAria(page, '[data-document-preview]', scaffold.workspaceCwd))
       .split(SEED_ID).join('{{seededId}}')
     await compareOrRefreshGolden(UI_EXPECTED, snapshot, MODE)
 
+    await row.getByText('notes.txt', { exact: true }).click()
+    const textPreview = page.locator('[data-textpreview-state="text"]')
+    await textPreview.waitFor({ timeout: 15_000 })
+    await expect.poll(() => textPreview.getByText('plain text').count(), { timeout: 10_000 }).toBe(1)
+
     await row.getByText('mermaid.html', { exact: true }).click()
+    await panel.waitFor({ timeout: 15_000 })
     await expect.poll(async () => {
-      const srcdoc = await panel.locator('iframe').getAttribute('srcdoc') ?? ''
-      return srcdoc.includes('blob:') && srcdoc.includes('<img')
+      const mermaidSrcdoc = await panel.locator('iframe').getAttribute('srcdoc') ?? ''
+      return mermaidSrcdoc.includes('blob:') && mermaidSrcdoc.includes('<img')
     }, { timeout: 20_000 }).toBe(true)
     expect(await panel.locator('iframe').getAttribute('sandbox')).toBe('allow-same-origin')
 
@@ -297,8 +288,6 @@ describe('web e2e: workspace document preview beside chat', () => {
     expect(app2Srcdoc).not.toMatch(/<script/i)
     expect(await panel.getByRole('button', { name: 'Enable interactive preview' }).count()).toBe(1)
 
-    await panel.getByLabel('Close preview').click()
-    await expect.poll(() => page.locator('[data-document-preview]').count(), { timeout: 10_000 }).toBe(0)
     await expect.poll(async () => {
       try {
         await fetch(grantOrigin as string, { signal: AbortSignal.timeout(800) })
@@ -307,6 +296,12 @@ describe('web e2e: workspace document preview beside chat', () => {
         return 'down'
       }
     }, { timeout: 10_000 }).toBe('down')
+
+    const column = page.locator('[data-rightbar-col]')
+    await column.locator('[data-dockkit-tab]').filter({ hasText: 'app2.html' })
+      .locator('[data-dockkit-tab-close]').click()
+    await expect.poll(() => panel.locator('iframe').getAttribute('srcdoc') ?? '', { timeout: 10_000 })
+      .not.toContain('static')
 
     expect(tripwire.pageErrors).toEqual([])
     expect(tripwire.warnings).toEqual([])
