@@ -343,7 +343,6 @@
     { "path": "./packages/host/interactive-preview" },
     { "path": "./packages/llm/plugin-package-inventory-deepseek" },
     { "path": "./packages/host/webserver" },
-    { "path": "./packages/host/interactive-preview" },
     { "path": "./packages/sdk/client" },
     { "path": "./packages/sdk/protocol" },
     { "path": "./packages/lsp/lsp" },

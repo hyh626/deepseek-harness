@@ -26,9 +26,9 @@ export interface MermaidBlockProps {
   /** Localized failure copy shown above the retained source fence. */
   errorLabel?: string | undefined
   /** Copy-button idle label forwarded to the fallback CodeBlock. */
-  copyLabel?: string | undefined
+  copyLabel: string
   /** Copy-button confirmation label forwarded to the fallback CodeBlock. */
-  copiedLabel?: string | undefined
+  copiedLabel: string
 }
 
 /**
