@@ -9,19 +9,19 @@
   ],
   "references": [
     {
-      "path": "../../../vendor/cordis"
-    },
-    {
       "path": "../../util/brand"
     },
     {
-      "path": "../locale"
+      "path": "../../../vendor/cordis"
+    },
+    {
+      "path": "../locale/tsconfig.client.json"
     },
     {
       "path": "../ui-slots"
     },
     {
-      "path": "../ui-theme"
+      "path": "../ui-theme/tsconfig.client.json"
     },
     {
       "path": "../ui-primitives"
@@ -34,6 +34,9 @@
     },
     {
       "path": "../ui-session"
+    },
+    {
+      "path": "../shortcuts/tsconfig.client.json"
     }
   ]
 }

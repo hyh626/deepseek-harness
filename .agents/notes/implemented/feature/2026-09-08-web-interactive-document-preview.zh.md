@@ -4,7 +4,7 @@ Status: implemented
 
 [English](2026-09-08-web-interactive-document-preview.md) | 中文
 
-> 范围：在聊天旁以显式同意在隔离的唯一源中运行工作区 HTML 应用、带 capability 的主机名、对该应用目录的受限 Host HTTP 提供、不含脚本的静态 HTML Mermaid，以及 iframe 导航残留风险披露。不在范围：Vite/Next/webpack 开发服务器、入口 HTML 目录之外的外链资源、用 cookie 作为 capability、在产品源上的同源 `/f/` 提供，或打开文件时自动运行脚本。静态 Markdown/HTML 预览仍由[文档预览决策](2026-08-18-web-document-preview.zh.md)拥有。工作区文件的同源 HTTP 提供仍由[工作区文件链接决策](2026-07-31-web-workspace-file-links.zh.md)拒绝。
+> 范围：在聊天旁以显式同意在隔离的唯一源中运行工作区 HTML 应用、带 capability 的主机名、对该应用目录的受限 Host HTTP 提供，以及 iframe 导航残留风险披露。不在范围：Vite/Next/webpack 开发服务器、入口 HTML 目录之外的外链资源、用 cookie 作为 capability、在产品源上的同源 `/f/` 提供，或打开文件时自动运行脚本。静态文档渲染器由随附的文档预览（`ui-sidebar-documentpreview`）拥有，本功能以一个备选渲染器扩展它。工作区文件的同源 HTTP 提供仍由[工作区文件链接决策](2026-07-31-web-workspace-file-links.zh.md)拒绝。
 
 ## Problem
 
@@ -12,9 +12,9 @@ Status: implemented
 
 ## Decision
 
-**静态预览仍是默认；打开文件从不运行脚本。** Markdown 与消毒后的 HTML 仍通过 `host.readPreviewDocument` / `host.readPreviewImage` 加载。静态 HTML iframe 保持没有 `allow-scripts` 的 `sandbox="allow-same-origin"`，以及禁止脚本、网络连接与 `http:`/`https:` 图片的 CSP（`img-src blob: data:`）。该消毒 HTML 中的 `pre.mermaid` 与 `div.mermaid` 通过 Markdown 所用的同一严格 Mermaid 适配器替换为 blob `<img>` SVG。
+**随附渲染器保持无脚本；交互渲染器是独立的实现。** 随附的 HTML 渲染器展示消毒后、无脚本的文档。交互预览为 `html`/`htm` 注册第二个 `documentPreviews` 实现（`loading: 'renderer'`）；工具栏的渲染器下拉按文件在两者之间选择。
 
-**交互模式是按文档的显式 grant。** 标签页的「启用交互预览」控件打开 `RiskConfirmation`。授权对当前 HTML 路径有效，直到标签页正文卸载或打开其他路径。同一路径的重新加载保留授权，并在上一 grant 停止后替换服务器 grant。客户端在 `stopInteractivePreview` 成功之前保留 grant id，以便稍后的关闭、处置或启动可以重试。启动失败时保留静态预览。`@deepseek-ai/dsh-client-ui-document-preview` 拥有该生命周期；`host.startInteractivePreview` / `host.stopInteractivePreview` 通过 `ctx.interactivePreview` 铸造与撤销 grant。Session 处置与已中止的 RPC `signal` 会中止尚未发布的 open，并关闭在取消之后才完成的 grant。
+**交互模式是按文档的显式 grant。** 渲染器的工具栏控件（键控 `sidebar.right.tab.document.action` 席位）打开 `RiskConfirmation`。同意按标签页生效：它保存在会话作用域 store 中，在渲染器切换与同一文件的重新加载后保留，新标签页对自己的文件询问一次。grant 的生命周期恰好是组件体挂载并运行一个修订：修订变更、渲染器切换与标签页关闭都会停止它。`@deepseek-ai/dsh-client-ui-interactive-html-preview` 拥有该生命周期；`remote.interactivePreview.start` / `remote.interactivePreview.stop` 通过 `ctx.interactivePreview` 铸造与撤销 grant。Session 处置与已中止的 RPC `signal` 会中止尚未发布的 open，并关闭在取消之后才完成的 grant。
 
 **Capability 在主机名中，不在 cookie 中。** `@deepseek-ai/dsh-host-interactive-preview` 在配置的 `bindHost`（默认 `127.0.0.1`）上监听操作系统分配的端口，并只应答铸造的 `Host` `<32 位十六进制>.<hostnameSuffix>`（默认后缀 `localhost`）。iframe 以 `sandbox="allow-scripts allow-same-origin"` 和 `referrerPolicy="no-referrer"` 加载该完整源。所有工作区 I/O 经 `ctx.fs` 从会话 cwd 进行；应用根目录是跟随符号链接后常规 `.html`/`.htm` 入口所在目录。仅 GET/HEAD；每个请求路径（含 `/` 与回退到入口文件名的 SPA）都在该次请求中通过 `ctx.fs` 解析；同源 CSS、JS 模块、图片、字体、WASM 与 `fetch` 可用；拒绝目录列表。
 
@@ -30,4 +30,4 @@ Status: implemented
 
 ## Consequences
 
-本地或远程 Web 客户端可以在聊天旁运行经显式信任的已构建 HTML 应用，而无需把工作区文件放到产品源上。改写 `Host` 或在没有匹配通配 DNS 后缀的情况下终止 TLS 的反向代理无法到达 grant；那些部署需要 overlay。`apps/web/tests/document-preview.e2e.ts` 钉住静态 HTML 中的 Mermaid、仅在同意后运行脚本、父页面隔离、拦截外部 `fetch`、第二个文档需要重新同意，以及关闭时拆除 grant。
+本地或远程 Web 客户端可以在聊天旁运行经显式信任的已构建 HTML 应用，而无需把工作区文件放到产品源上。改写 `Host` 或在没有匹配通配 DNS 后缀的情况下终止 TLS 的反向代理无法到达 grant；那些部署需要 overlay。该渲染器的组件 spec 钉住同意门控、修订变更、渲染器切换、卸载与标签页关闭时的 grant 拆除，以及带重试的失败行；经过真实宿主服务器的浏览器 e2e 仍是发布该渲染器的组合中的待办工作。

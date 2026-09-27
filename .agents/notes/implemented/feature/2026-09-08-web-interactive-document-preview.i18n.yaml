@@ -1,6 +1,19 @@
-# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
-# side as of the last confirmed-consistent state. Both languages carry equal authority;
-# after editing either side, bring the other along and re-record with:
+# Bilingual-pair consistency record for 2026-09-08-web-interactive-document-preview.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write .agents/notes/implemented/feature/2026-09-08-web-interactive-document-preview.md
-2026-09-08-web-interactive-document-preview.md: 9e75bbfcd21a46fb1fd666eca339ddd39acea5bd
-2026-09-08-web-interactive-document-preview.zh.md: 551d857cf56baa8b8812680ffd8b5f4c6ff47e29
+/agent-note-opt-in-interactive-html-preview-origin:
+  en: cc680bb0d258fece
+  zh: f1617ea2588694a1
+/agent-note-opt-in-interactive-html-preview-origin/problem:
+  en: 3f785865b50c3b26
+  zh: 3d3572beb7356e98
+/agent-note-opt-in-interactive-html-preview-origin/decision:
+  en: 118dfd2ffb7a6357
+  zh: 1fc16f9dfecb1860
+/agent-note-opt-in-interactive-html-preview-origin/alternatives-considered:
+  en: 33ebf49842fd362b
+  zh: 7861c13f81fcb05d
+/agent-note-opt-in-interactive-html-preview-origin/consequences:
+  en: 81670ba56ca71355
+  zh: a21277e4230eb8a0

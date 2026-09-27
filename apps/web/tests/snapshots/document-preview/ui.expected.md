@@ -1,5 +1,0 @@
-- text: page.html
-- button "Enable interactive preview"
-- button "Reload"
-- button "Open externally"
-- iframe
