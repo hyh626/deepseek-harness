@@ -98,6 +98,13 @@
     - id: plugin-inventory
       name: '@deepseek-ai/dsh-host-plugin-inventory'
 
+    # Ephemeral unique-origin HTTP grants for interactive HTML previews.
+    - id: interactive-preview
+      name: '@deepseek-ai/dsh-host-interactive-preview'
+      config:
+        bindHost: '127.0.0.1'
+        hostnameSuffix: 'localhost'
+
     # Session commands, cold reads, and live control over Typert Remote.
     - id: session-controller
       name: '@deepseek-ai/dsh-api-session-controller'
@@ -267,6 +274,10 @@
     # Markdown, code, HTML, PDF, Office, and plain-text renderers.
     - id: ui-sidebar-documentpreview
       name: '@deepseek-ai/dsh-client-ui-sidebar-documentpreview'
+
+    # Consent-gated interactive HTML running on the host's unique-origin grants.
+    - id: ui-interactive-html-preview
+      name: '@deepseek-ai/dsh-client-ui-interactive-html-preview'
 
     # Web profiles opt in; Desktop retains sandboxed HTTP(S) Browser tabs.
     - id: ui-sidebar-browser

@@ -48,6 +48,9 @@
       "path": "../../host/plugin-inventory"
     },
     {
+      "path": "../../host/interactive-preview"
+    },
+    {
       "path": "../../interaction/commands"
     },
     {
